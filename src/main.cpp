@@ -48,6 +48,7 @@ struct Rect {
 Rect rect_make(int x, int y, int w, int h) {
     return { x, y, w, h, x + w, y + h };
 }
+
 void rect_center(const Rect &rect, int &x, int &y) {
     x = rect.x + (rect.w / 2);
     y = rect.y + (rect.h / 2);
@@ -83,7 +84,7 @@ void map_block(int x, int y) {
     _map[map_index(x, y)].block_sight = true;
 }
 
-void map_make_room(Rect room) {
+void map_make_room(const Rect &room) {
     for(int x = room.x + 1; x < room.x2; x++) {
         for(int y = room.y + 1; y < room.y2; y++) {
             _map[map_index(x, y)].blocked = false;
@@ -98,7 +99,7 @@ void map_make_room(Rect room) {
 }
 
 void map_make_h_tunnel(int x1, int x2, int y) {
-    for(int x = std::min(x1, x2); x <= std::max(x1, x2); x++) {
+    for(int x = std::min(x1, x2); x < std::max(x1, x2) + 1; x++) {
         _map[map_index(x, y)].blocked = false;
         _map[map_index(x, y)].block_sight = false;
     }
@@ -108,7 +109,7 @@ void map_make_h_tunnel(int x1, int x2, int y) {
 // +           self.tiles[x][y].block_sight = False
 }
 void map_make_v_tunnel(int y1, int y2, int x) {
-    for(int y = std::min(y1, y2); x <= std::max(y1, y2); y++) {
+    for(int y = std::min(y1, y2); y < std::max(y1, y2) + 1; y++) {
         _map[map_index(x, y)].blocked = false;
         _map[map_index(x, y)].block_sight = false;
     }
@@ -121,6 +122,7 @@ void map_make_v_tunnel(int y1, int y2, int x) {
 void map_generate(int max_rooms, int room_min_size, int room_max_size, int map_width, int map_height, Entity &player) {
     int num_rooms = 0;
     std::vector<Rect> rooms;
+
     for(int i = 0; i < max_rooms; i++) {
         // random width and height
         int w = rand_int(room_min_size, room_max_size);
@@ -132,61 +134,41 @@ void map_generate(int max_rooms, int room_min_size, int room_max_size, int map_w
         Rect new_room = rect_make(x, y, w, h);
 
         // See if any room intersects
+        bool intersects = false;
         for(auto &r : rooms) {
             if(rect_intersects(r, new_room)) {
+                intersects = true;
                 break;
-            } else {
-                
-                /*
-                    else:
-+               # this means there are no intersections, so this room is valid
-+
-+               # "paint" it to the map's tiles
-+               self.create_room(new_room)
-+
-+               # center coordinates of new room, will be useful later
-+               (new_x, new_y) = new_room.center()
-+
-+               if num_rooms == 0:
-+                   # this is the first room, where the player starts at
-+                   player.x = new_x
-+                   player.y = new_y
-                else:
-+                   # all rooms after the first:
-+                   # connect it to the previous room with a tunnel
-+
-+                   # center coordinates of previous room
-+                   (prev_x, prev_y) = rooms[num_rooms - 1].center()
-+
-+                   # flip a coin (random number that is either 0 or 1)
-+                   if randint(0, 1) == 1:
-+                       # first move horizontally, then vertically
-+                       self.create_h_tunnel(prev_x, new_x, prev_y)
-+                       self.create_v_tunnel(prev_y, new_y, new_x)
-+                   else:
-+                       # first move vertically, then horizontally
-+                       self.create_v_tunnel(prev_y, new_y, prev_x)
-+                       self.create_h_tunnel(prev_x, new_x, new_y)
-+
-+               # finally, append the new room to the list
-+               rooms.append(new_room)
-+               num_rooms += 1
-                 */
             }
-
         }
-    }
 
-//     rooms = []
-// +       num_rooms = 0
-// +
-// +       for r in range(max_rooms):
-// +           // random width and height
-// +           w = randint(room_min_size, room_max_size)
-// +           h = randint(room_min_size, room_max_size)
-// +           // random position without going out of the boundaries of the map
-// +           x = randint(0, map_width - w - 1)
-// +           y = randint(0, map_height - h - 1)
+        if(intersects) {
+            continue;
+        }
+
+        // "paint" it to the map's tiles
+        map_make_room(new_room);
+        int new_x, new_y;
+        rect_center(new_room, new_x, new_y);
+
+        if(num_rooms == 0) {
+            player.x = new_x;
+            player.y = new_y;
+        } else {
+            int prev_x, prev_y;
+            rect_center(rooms[num_rooms - 1], prev_x, prev_y);
+            if(rand_int(0, 1) == 1) {
+                map_make_h_tunnel(prev_x, new_x, prev_y);
+                map_make_v_tunnel(prev_y, new_y, new_x);
+            } else {
+                map_make_v_tunnel(prev_y, new_y, new_x);
+                map_make_h_tunnel(prev_x, new_x, prev_y);
+            }
+        }
+
+        rooms.push_back(new_room);
+        num_rooms++;
+    }
 }
 
 int main( int argc, char *argv[] ) {
@@ -198,8 +180,8 @@ int main( int argc, char *argv[] ) {
      
     auto root_console = TCODConsole::root;
 
-    _entities.push_back(entity_make(SCREEN_WIDTH/2,SCREEN_HEIGHT/2, '@', TCODColor::white));
-    _entities.push_back(entity_make(SCREEN_WIDTH/2 - 5,SCREEN_HEIGHT/2, '@', TCODColor::yellow));
+    _entities.push_back(entity_make(SCREEN_WIDTH/2, SCREEN_HEIGHT/2, '@', TCODColor::white));
+    _entities.push_back(entity_make(SCREEN_WIDTH/2 - 5, SCREEN_HEIGHT/2, '@', TCODColor::yellow));
 
     map_generate(Max_rooms, Room_min_size, Room_max_size, Map_Width, Map_Height, _entities[0]);
 
