@@ -44,6 +44,13 @@ int map_index(int x, int y) {
     return x + Map_Width * y;
 }
 
+bool map_blocked(int x, int y) {
+    if(_map[map_index(x, y)].blocked) {
+        return true;
+    }
+    return false;
+}
+
 int main( int argc, char *argv[] ) {
     TCODConsole::setCustomFont("data/arial10x10.png", TCOD_FONT_TYPE_GREYSCALE | TCOD_FONT_LAYOUT_TCOD);
     TCODConsole::initRoot(SCREEN_WIDTH, SCREEN_HEIGHT, "libtcod C++ tutorial", false);
@@ -82,7 +89,7 @@ int main( int argc, char *argv[] ) {
         //// UPDATE
 
         Entity &player = _entities[0];
-        if(!_map[map_index(player.x + m.x, player.y + m.y)].blocked) {
+        if(!map_blocked(player.x + m.x, player.y + m.y)) {
             player.x += m.x;
             player.y += m.y;
         }
