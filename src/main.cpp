@@ -34,9 +34,11 @@ struct Entity {
     int x,y;
     int gfx;
     TCODColor color;
+    char *name;
+    bool blocks = false;
 };
-Entity entity_make(int x, int y, int gfx, TCODColor color) {
-    return { x, y, gfx, color };
+Entity entity_make(int x, int y, int gfx, TCODColor color, char *name, bool blocks) {
+    return { x, y, gfx, color, name, blocks };
 }
 
 struct Tile {
@@ -62,7 +64,9 @@ bool rect_intersects(const Rect &r, const Rect &other) {
         r.y <= other.y2 && r.y2 >= other.y;
 }
 
-std::vector<Entity> _entities;
+const int MAX_ENTITIES = 1000;
+Entity _entities[MAX_ENTITIES];
+int _entity_count = 0; 
 
 const int Map_Width = 80;
 const int Map_Height = 50;
@@ -195,11 +199,11 @@ void map_add_entities(int max_monsters_per_room) {
 
             Entity e;
             if(rand_int(0, 100) < 80) {
-                e = { x, y, 'o', TCOD_desaturated_green };
+                e = { x, y, 'o', TCOD_desaturated_green, "Orc", true  };
             } else {
-                e = { x, y, 'T', TCOD_darker_green };
+                e = { x, y, 'T', TCOD_darker_green, "Troll", true };
             }
-            _entities.push_back(e);
+            _entities[_entity_count++] = e;
         }
     }
 }
@@ -213,18 +217,21 @@ int main( int argc, char *argv[] ) {
      
     auto root_console = TCODConsole::root;
 
-    _entities.reserve(1000);
-    _entities.push_back(entity_make(SCREEN_WIDTH/2, SCREEN_HEIGHT/2, '@', TCODColor::white));
+    // Without this line movement doesnt work ?
+    _entities[_entity_count++] = entity_make(SCREEN_WIDTH/2, SCREEN_HEIGHT/2, '@', TCODColor::white, "Player", true);
     
-    Entity &player = _entities.at(0);
-
+    Entity &player = _entities[0];
+    
     // generate map and fov
     tcod_fov_map = new TCODMap(Map_Width, Map_Height);
+    // Should separate fov from map_generate (make_room)
     map_generate(Max_rooms, Room_min_size, Room_max_size, Map_Width, Map_Height);
     
+    // Place player in first room
     rect_center(rooms[0], player.x, player.y);
-
+    // Setup fov from players position
     tcod_fov_map->computeFov(player.x, player.y, fov_radius, fov_light_walls, fov_algorithm);
+
     // add entities to map
     map_add_entities(Max_monsters_per_room);
 
@@ -250,7 +257,6 @@ int main( int argc, char *argv[] ) {
         
         //// UPDATE
 
-        player = _entities.at(0);
         if((m.x != 0 || m.y != 0) && !map_blocked(player.x + m.x, player.y + m.y)) {
             player.x = player.x + m.x;
             player.y = player.y + m.y;
