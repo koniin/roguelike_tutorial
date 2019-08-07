@@ -129,7 +129,7 @@ void map_make_v_tunnel(int y1, int y2, int x) {
 // +           self.tiles[x][y].block_sight = False
 }
 
-void map_generate(int max_rooms, int room_min_size, int room_max_size, int map_width, int map_height, Entity &player) {
+void map_generate(int max_rooms, int room_min_size, int room_max_size, int map_width, int map_height) {
     for(int i = 0; i < max_rooms; i++) {
         // random width and height
         int w = rand_int(room_min_size, room_max_size);
@@ -158,10 +158,7 @@ void map_generate(int max_rooms, int room_min_size, int room_max_size, int map_w
         int new_x, new_y;
         rect_center(new_room, new_x, new_y);
 
-        if(num_rooms == 0) {
-            player.x = new_x;
-            player.y = new_y;
-        } else {
+        if(num_rooms > 0) {
             int prev_x, prev_y;
             rect_center(rooms[num_rooms - 1], prev_x, prev_y);
             if(rand_int(0, 1) == 1) {
@@ -219,13 +216,15 @@ int main( int argc, char *argv[] ) {
     _entities.reserve(1000);
     _entities.push_back(entity_make(SCREEN_WIDTH/2, SCREEN_HEIGHT/2, '@', TCODColor::white));
     
-    Entity &player = _entities[0];
+    Entity &player = _entities.at(0);
 
     // generate map and fov
     tcod_fov_map = new TCODMap(Map_Width, Map_Height);
-    map_generate(Max_rooms, Room_min_size, Room_max_size, Map_Width, Map_Height, _entities[0]);
-    tcod_fov_map->computeFov(player.x, player.y, fov_radius, fov_light_walls, fov_algorithm);
+    map_generate(Max_rooms, Room_min_size, Room_max_size, Map_Width, Map_Height);
+    
+    rect_center(rooms[0], player.x, player.y);
 
+    tcod_fov_map->computeFov(player.x, player.y, fov_radius, fov_light_walls, fov_algorithm);
     // add entities to map
     map_add_entities(Max_monsters_per_room);
 
@@ -251,10 +250,10 @@ int main( int argc, char *argv[] ) {
         
         //// UPDATE
 
-        player = _entities[0];
+        player = _entities.at(0);
         if((m.x != 0 || m.y != 0) && !map_blocked(player.x + m.x, player.y + m.y)) {
-            player.x += m.x;
-            player.y += m.y;
+            player.x = player.x + m.x;
+            player.y = player.y + m.y;
             tcod_fov_map->computeFov(player.x, player.y, fov_radius, fov_light_walls, fov_algorithm);
         }
 
