@@ -208,6 +208,17 @@ void map_add_entities(int max_monsters_per_room) {
     }
 }
 
+bool entity_at(int x, int y, Entity *found_entity) {
+    for(int i = 0; i < _entity_count; i++) {
+        auto &entity = _entities[i];
+        if(entity.blocks && x == entity.x && y == entity.y) {
+            *found_entity = _entities[i];
+            return true;
+        }
+    }
+    return false;
+}
+
 int main( int argc, char *argv[] ) {
     srand((unsigned int)time(NULL));
 
@@ -217,7 +228,6 @@ int main( int argc, char *argv[] ) {
      
     auto root_console = TCODConsole::root;
 
-    // Without this line movement doesnt work ?
     _entities[_entity_count++] = entity_make(SCREEN_WIDTH/2, SCREEN_HEIGHT/2, '@', TCODColor::white, "Player", true);
     
     Entity &player = _entities[0];
@@ -257,10 +267,16 @@ int main( int argc, char *argv[] ) {
         
         //// UPDATE
 
-        if((m.x != 0 || m.y != 0) && !map_blocked(player.x + m.x, player.y + m.y)) {
-            player.x = player.x + m.x;
-            player.y = player.y + m.y;
-            tcod_fov_map->computeFov(player.x, player.y, fov_radius, fov_light_walls, fov_algorithm);
+        int dx = player.x + m.x, dy = player.y + m.y;
+        if((m.x != 0 || m.y != 0) && !map_blocked(dx, dy)) {
+            Entity target;;
+            if(entity_at(dx, dy, &target)) {
+                printf("You kick the %s in the shins, much to its annoyance!", target.name);    
+            } else {
+                player.x = dx;
+                player.y = dy;
+                tcod_fov_map->computeFov(player.x, player.y, fov_radius, fov_light_walls, fov_algorithm);
+            }
         }
 
         //// RENDER
@@ -282,14 +298,14 @@ int main( int argc, char *argv[] ) {
             }
         }
 
-        for(auto &entity : _entities) {
+        for(int i = 0; i < _entity_count; i++) {
+            const auto &entity = _entities[i];
             if(!tcod_fov_map->isInFov(entity.x, entity.y)) {
                 continue;
             }
             root_console->setDefaultForeground(entity.color);
             root_console->putChar(entity.x, entity.y, entity.gfx);
         }
-
         
         TCODConsole::flush();
     }
