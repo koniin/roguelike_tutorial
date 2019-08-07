@@ -71,11 +71,16 @@ const int Room_min_size = 6;
 const int Max_rooms = 30;
 Tile _map[Map_Width * Map_Height];
 
+int num_rooms = 0;
+std::vector<Rect> rooms;
+
 const TCOD_fov_algorithm_t fov_algorithm = FOV_BASIC;
 const bool fov_light_walls = true;
 const int fov_radius = 10;
 bool fov_recompute = true;
 TCODMap *tcod_fov_map;
+
+const int Max_monsters_per_room = 3;
 
 int map_index(int x, int y) {
     return x + Map_Width * y;
@@ -125,9 +130,6 @@ void map_make_v_tunnel(int y1, int y2, int x) {
 }
 
 void map_generate(int max_rooms, int room_min_size, int room_max_size, int map_width, int map_height, Entity &player) {
-    int num_rooms = 0;
-    std::vector<Rect> rooms;
-
     for(int i = 0; i < max_rooms; i++) {
         // random width and height
         int w = rand_int(room_min_size, room_max_size);
@@ -176,6 +178,35 @@ void map_generate(int max_rooms, int room_min_size, int room_max_size, int map_w
     }
 }
 
+void map_add_entities(int max_monsters_per_room) {
+    for(const Rect &room : rooms) {
+        int number_of_monsters = rand_int(0, max_monsters_per_room);
+        for(int i = 0; i < number_of_monsters; i++) {
+            int x = rand_int(room.x + 1, room.x2 - 1); 
+            int y = rand_int(room.y + 1, room.y2 - 1);
+
+            bool occupied = false;
+            for(auto &e : _entities) {
+                if(e.x == x && e.y == y) {
+                    occupied = true;
+                    break;
+                }
+            }
+            if(occupied) {
+                continue;
+            }
+
+            Entity e;
+            if(rand_int(0, 100) < 80) {
+                e = { x, y, 'o', TCOD_desaturated_green };
+            } else {
+                e = { x, y, 'T', TCOD_darker_green };
+            }
+            _entities.push_back(e);
+        }
+    }
+}
+
 int main( int argc, char *argv[] ) {
     srand((unsigned int)time(NULL));
 
@@ -185,22 +216,24 @@ int main( int argc, char *argv[] ) {
      
     auto root_console = TCODConsole::root;
 
+    _entities.reserve(1000);
     _entities.push_back(entity_make(SCREEN_WIDTH/2, SCREEN_HEIGHT/2, '@', TCODColor::white));
-    _entities.push_back(entity_make(SCREEN_WIDTH/2 - 5, SCREEN_HEIGHT/2, '@', TCODColor::yellow));
     
     Entity &player = _entities[0];
 
+    // generate map and fov
     tcod_fov_map = new TCODMap(Map_Width, Map_Height);
     map_generate(Max_rooms, Room_min_size, Room_max_size, Map_Width, Map_Height, _entities[0]);
-    
     tcod_fov_map->computeFov(player.x, player.y, fov_radius, fov_light_walls, fov_algorithm);
-    _map[map_index(player.x, player.y)].explored = true;
+
+    // add entities to map
+    map_add_entities(Max_monsters_per_room);
 
     while ( !TCODConsole::isWindowClosed() ) {
         TCODSystem::checkForEvent(TCOD_EVENT_KEY_PRESS,&key,NULL);
 
         //// INPUT
-
+        
         Movement m = { 0, 0 };
         switch(key.vk) {
             case TCODK_UP : m.y = -1; break;
@@ -218,6 +251,7 @@ int main( int argc, char *argv[] ) {
         
         //// UPDATE
 
+        player = _entities[0];
         if((m.x != 0 || m.y != 0) && !map_blocked(player.x + m.x, player.y + m.y)) {
             player.x += m.x;
             player.y += m.y;
@@ -233,17 +267,13 @@ int main( int argc, char *argv[] ) {
             for(int x = 0; x < Map_Width; x++) {
                 if (tcod_fov_map->isInFov(x, y)) {
                     _map[map_index(x, y)].explored = true;
+
                     TCODConsole::root->setCharBackground(x, y,
                         _map[map_index(x, y)].block_sight ? color_table.light_wall : color_table.light_ground );
                 } else if ( _map[map_index(x, y)].explored ) {
                     TCODConsole::root->setCharBackground(x,y,
                         _map[map_index(x, y)].block_sight ? color_table.dark_wall : color_table.dark_ground );
                 }
-                // if(_map[map_index(x, y)].block_sight) {
-                //     root_console->setCharBackground(x, y, color_table.dark_wall);
-                // } else {
-                //     root_console->setCharBackground(x, y, color_table.dark_ground);
-                // }
             }
         }
 
