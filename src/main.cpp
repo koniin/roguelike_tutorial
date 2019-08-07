@@ -4,8 +4,8 @@
 #include <stdlib.h>
 
 // 
-// http://rogueliketutorials.com/tutorials/tcod/part-1/
-// 
+// http://rogueliketutorials.com/tutorials/tcod/part-4/
+
 // http://www.roguebasin.com/index.php?title=Complete_roguelike_tutorial_using_C%2B%2B_and_libtcod_-_part_2:_map_and_actors
 // 
 // These differ somewhat
@@ -22,6 +22,8 @@ const int SCREEN_HEIGHT = 50;
 struct Colors {
     TCODColor dark_wall = TCODColor(0, 0, 100);
     TCODColor dark_ground = TCODColor(50, 50, 150);
+    TCODColor light_wall = TCODColor(130, 110, 50);
+    TCODColor light_ground = TCODColor(200, 180, 50);
 } color_table;
 
 struct Movement {
@@ -40,6 +42,7 @@ Entity entity_make(int x, int y, int gfx, TCODColor color) {
 struct Tile {
     bool blocked = true;
     bool block_sight = true;
+    bool explored = false;
 };
 
 struct Rect {
@@ -68,6 +71,12 @@ const int Room_min_size = 6;
 const int Max_rooms = 30;
 Tile _map[Map_Width * Map_Height];
 
+const TCOD_fov_algorithm_t fov_algorithm = FOV_BASIC;
+const bool fov_light_walls = true;
+const int fov_radius = 10;
+bool fov_recompute = true;
+TCODMap *tcod_fov_map;
+
 int map_index(int x, int y) {
     return x + Map_Width * y;
 }
@@ -79,16 +88,12 @@ bool map_blocked(int x, int y) {
     return false;
 }
 
-void map_block(int x, int y) {
-    _map[map_index(x, y)].blocked = true;
-    _map[map_index(x, y)].block_sight = true;
-}
-
 void map_make_room(const Rect &room) {
     for(int x = room.x + 1; x < room.x2; x++) {
         for(int y = room.y + 1; y < room.y2; y++) {
             _map[map_index(x, y)].blocked = false;
-            _map[map_index(x, y)].block_sight = false;           
+            _map[map_index(x, y)].block_sight = false;   
+            tcod_fov_map->setProperties(x, y, true, true);
         }    
     }
 //     for x in range(room.x1 + 1, room.x2):
@@ -182,8 +187,14 @@ int main( int argc, char *argv[] ) {
 
     _entities.push_back(entity_make(SCREEN_WIDTH/2, SCREEN_HEIGHT/2, '@', TCODColor::white));
     _entities.push_back(entity_make(SCREEN_WIDTH/2 - 5, SCREEN_HEIGHT/2, '@', TCODColor::yellow));
+    
+    Entity &player = _entities[0];
 
+    tcod_fov_map = new TCODMap(Map_Width, Map_Height);
     map_generate(Max_rooms, Room_min_size, Room_max_size, Map_Width, Map_Height, _entities[0]);
+    
+    tcod_fov_map->computeFov(player.x, player.y, fov_radius, fov_light_walls, fov_algorithm);
+    _map[map_index(player.x, player.y)].explored = true;
 
     while ( !TCODConsole::isWindowClosed() ) {
         TCODSystem::checkForEvent(TCOD_EVENT_KEY_PRESS,&key,NULL);
@@ -207,10 +218,10 @@ int main( int argc, char *argv[] ) {
         
         //// UPDATE
 
-        Entity &player = _entities[0];
-        if(!map_blocked(player.x + m.x, player.y + m.y)) {
+        if((m.x != 0 || m.y != 0) && !map_blocked(player.x + m.x, player.y + m.y)) {
             player.x += m.x;
             player.y += m.y;
+            tcod_fov_map->computeFov(player.x, player.y, fov_radius, fov_light_walls, fov_algorithm);
         }
 
         //// RENDER
@@ -220,15 +231,26 @@ int main( int argc, char *argv[] ) {
 
         for(int y = 0; y < Map_Height; y++) {
             for(int x = 0; x < Map_Width; x++) {
-                if(_map[map_index(x, y)].block_sight) {
-                    root_console->setCharBackground(x, y, color_table.dark_wall);
-                } else {
-                    root_console->setCharBackground(x, y, color_table.dark_ground);
+                if (tcod_fov_map->isInFov(x, y)) {
+                    _map[map_index(x, y)].explored = true;
+                    TCODConsole::root->setCharBackground(x, y,
+                        _map[map_index(x, y)].block_sight ? color_table.light_wall : color_table.light_ground );
+                } else if ( _map[map_index(x, y)].explored ) {
+                    TCODConsole::root->setCharBackground(x,y,
+                        _map[map_index(x, y)].block_sight ? color_table.dark_wall : color_table.dark_ground );
                 }
+                // if(_map[map_index(x, y)].block_sight) {
+                //     root_console->setCharBackground(x, y, color_table.dark_wall);
+                // } else {
+                //     root_console->setCharBackground(x, y, color_table.dark_ground);
+                // }
             }
         }
 
         for(auto &entity : _entities) {
+            if(!tcod_fov_map->isInFov(entity.x, entity.y)) {
+                continue;
+            }
             root_console->setDefaultForeground(entity.color);
             root_console->putChar(entity.x, entity.y, entity.gfx);
         }
