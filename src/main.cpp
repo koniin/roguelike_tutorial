@@ -4,7 +4,7 @@
 #include <stdlib.h>
 
 // 
-// http://rogueliketutorials.com/tutorials/tcod/part-4/
+// http://rogueliketutorials.com/tutorials/tcod/part-6/
 
 // http://www.roguebasin.com/index.php?title=Complete_roguelike_tutorial_using_C%2B%2B_and_libtcod_-_part_2:_map_and_actors
 // 
