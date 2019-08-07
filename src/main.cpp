@@ -26,6 +26,11 @@ struct Colors {
     TCODColor light_ground = TCODColor(200, 180, 50);
 } color_table;
 
+enum GameState {
+    PLAYER_TURN,
+    ENEMY_TURN
+} game_state;
+
 struct Movement {
     int x, y;
 };
@@ -245,6 +250,8 @@ int main( int argc, char *argv[] ) {
     // add entities to map
     map_add_entities(Max_monsters_per_room);
 
+    game_state = PLAYER_TURN;
+
     while ( !TCODConsole::isWindowClosed() ) {
         TCODSystem::checkForEvent(TCOD_EVENT_KEY_PRESS,&key,NULL);
 
@@ -268,7 +275,7 @@ int main( int argc, char *argv[] ) {
         //// UPDATE
 
         int dx = player.x + m.x, dy = player.y + m.y;
-        if((m.x != 0 || m.y != 0) && !map_blocked(dx, dy)) {
+        if(game_state == PLAYER_TURN && (m.x != 0 || m.y != 0) && !map_blocked(dx, dy)) {
             Entity target;;
             if(entity_at(dx, dy, &target)) {
                 printf("You kick the %s in the shins, much to its annoyance!", target.name);    
@@ -277,6 +284,16 @@ int main( int argc, char *argv[] ) {
                 player.y = dy;
                 tcod_fov_map->computeFov(player.x, player.y, fov_radius, fov_light_walls, fov_algorithm);
             }
+
+            game_state = ENEMY_TURN;
+        } else if(game_state == ENEMY_TURN) {
+            for(int i = 1; i < _entity_count; i++) {
+                const auto &entity = _entities[i];
+                
+                printf("The %s ponders the meaning of its existence.\n", entity.name);
+            }
+
+           game_state = PLAYER_TURN;
         }
 
         //// RENDER
