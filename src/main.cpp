@@ -3,6 +3,7 @@
 #include <unordered_map>
 #include <time.h>
 #include <stdlib.h>
+#include <stdarg.h>
 
 
 // http://rogueliketutorials.com/tutorials/tcod/part-7/
@@ -377,7 +378,7 @@ bool entity_render_sort(const Entity *first, const Entity *second) {
     return first->render_order < second->render_order;
 }
 
-void render_bar(TCODConsole *panel, int x, int y, int total_width, std::string name, 
+void gui_render_bar(TCODConsole *panel, int x, int y, int total_width, std::string name, 
                     int value, int maximum, TCOD_color_t bar_color, TCOD_color_t back_color) {
     int bar_width = int(float(value) / maximum * total_width);
 
@@ -402,6 +403,49 @@ void render_bar(TCODConsole *panel, int x, int y, int total_width, std::string n
 
     // TCOD_console_set_default_foreground(panel, TCOD_white);
     // TCOD_console_print_ex(panel, x + total_width / 2, y, TCOD_BKGND_NONE, TCOD_CENTER, "%s: %d/%d", name.c_str(), value, maximum);
+}
+
+struct LogEntry {
+    char *text;
+    TCODColor color;
+    LogEntry(const char *text_, const TCODColor &col_) : 
+        text(strdup(text_)), color(col_) {    
+    }
+    ~LogEntry() {
+        free(text);
+    } 
+};
+std::vector<LogEntry*> gui_log;
+static const int Log_x = Bar_width + 2;
+static const int Log_height = Panel_height - 1;
+void gui_log_message(const TCODColor &col, const char *text, ...) {
+    va_list ap;
+    char buf[128];
+    va_start(ap, text);
+    vsprintf(buf, text, ap);
+    va_end(ap);
+
+    char *lineBegin = buf;
+    char *lineEnd;
+
+    do {
+        // make room for the new message
+        if ( gui_log.size() == Log_height ) {
+            LogEntry *toRemove = gui_log.at(0);
+            gui_log.erase(gui_log.begin());
+            delete toRemove;
+        }
+        // detect end of the line
+        lineEnd=strchr(lineBegin,'\n');
+        if ( lineEnd ) {
+            *lineEnd='\0';
+        }
+        // add a new message to the log
+        LogEntry *msg = new LogEntry(lineBegin, col);
+        gui_log.push_back(msg);
+        // go to next line
+        lineBegin = lineEnd+1;
+   } while ( lineEnd );
 }
 
 int main( int argc, char *argv[] ) {
@@ -513,19 +557,20 @@ int main( int argc, char *argv[] ) {
         for(auto &e : _event_queue) {
             switch(e.type) {
                 case EventType::Message: {
-                    printf("|| %s \n", e.message.c_str());
+                    gui_log_message(TCOD_amber, e.message.c_str());
+                    //printf("|| %s \n", e.message.c_str());
                     break;
                 }
                 case EventType::EntityDead: {
                     // shitty way to know if player died
                     if(e.entity == player) {
-                        printf("|| YOU died! \n");
+                        gui_log_message(TCOD_red, "YOU died!");
                         game_state = PLAYER_DEAD;
                         player->gfx = '%';
                         player->color = TCOD_dark_red;
                         player->render_order = render_priority.CORPSE;
                     } else {
-                        printf("|| %s died! \n", e.entity->name.c_str());
+                        gui_log_message(TCOD_red, "%s died!", e.entity->name.c_str());
                         e.entity->gfx = '%';
                         e.entity->color = TCOD_dark_red;
                         e.entity->render_order = render_priority.CORPSE;
@@ -575,12 +620,22 @@ int main( int argc, char *argv[] ) {
         // UI RENDER
         bar->setDefaultBackground(TCODColor::black);
         bar->clear();
-        render_bar(bar, 1, 1, Bar_width, "HP", player->fighter->hp, player->fighter->hp_max, TCOD_light_red, TCOD_darker_red);
+        gui_render_bar(bar, 1, 1, Bar_width, "HP", player->fighter->hp, player->fighter->hp_max, TCOD_light_red, TCOD_darker_red);
 //         +   render_bar(panel, 1, 1, bar_width, 'HP', player.fighter.hp, player.fighter.max_hp,
 // +              libtcod.light_red, libtcod.darker_red)
         // root_console->setDefaultForeground(TCOD_white);
         // root_console->printEx(1, SCREEN_HEIGHT - 2, TCOD_BKGND_NONE, TCOD_LEFT, "HP: %d/%d", player->fighter->hp, player->fighter->hp_max);
         
+        float colorCoef = 0.4f;
+        for(int i = 0, y = 1; i < gui_log.size(); i++, y++) {
+            bar->setDefaultForeground(gui_log[i]->color * colorCoef);
+            bar->print(Log_x, y, gui_log[i]->text);
+            // could one-line this with a clamp;
+            if (colorCoef < 1.0f ) {
+                colorCoef += 0.3f;
+            }
+        }
+
         TCODConsole::blit(bar, 0, 0, SCREEN_WIDTH, Panel_height, root_console, 0, Panel_y);
 
         if(game_state == PLAYER_DEAD) {
