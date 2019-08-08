@@ -53,6 +53,7 @@ struct Event {
     EventType type;
     Entity *entity = NULL;
     std::string message;
+    TCOD_color_t color;
 };
 
 std::vector<Event> _event_queue; 
@@ -115,14 +116,14 @@ struct Fighter {
             // VERY SHITTY STRING ALLOCATION
             char buffer[255];
             sprintf(buffer, "%s attacks %s for %d hit points", _owner->name.c_str(), entity->name.c_str(), damage);
-            events_queue({ EventType::Message, NULL, buffer });
+            events_queue({ EventType::Message, NULL, buffer, TCOD_amber });
 
             entity->fighter->take_damage(damage);
         } else {
             // VERY SHITTY STRING ALLOCATION
             char buffer[255];
             sprintf(buffer, "%s attacks %s but deals no damage", _owner->name.c_str(), entity->name.c_str());
-            events_queue({ EventType::Message, NULL, buffer });
+            events_queue({ EventType::Message, NULL, buffer, TCOD_light_grey });
         }
     }
 };
@@ -448,12 +449,34 @@ void gui_log_message(const TCODColor &col, const char *text, ...) {
    } while ( lineEnd );
 }
 
+void gui_render_mouse_look(TCODConsole *con, int mouse_x, int mouse_y) {
+    if(!tcod_fov_map->isInFov(mouse_x, mouse_y)) {
+        return;
+    }
+
+    std::string name_list = "";
+    for(size_t i = 0; i < _entities.size(); i++) {
+        auto entity = _entities[i];
+        if(entity->x == mouse_x && entity->y == mouse_y) {
+            if(name_list == "") {
+                name_list = entity->name;
+            } else {
+                name_list += ", " + entity->name;
+            }
+        }
+    }
+
+    con->setDefaultForeground(TCODColor::lightGrey);
+    con->print(1, 0, name_list.c_str());
+}
+
 int main( int argc, char *argv[] ) {
     srand((unsigned int)time(NULL));
 
     TCODConsole::setCustomFont("data/arial10x10.png", TCOD_FONT_TYPE_GREYSCALE | TCOD_FONT_LAYOUT_TCOD);
     TCODConsole::initRoot(SCREEN_WIDTH, SCREEN_HEIGHT, "libtcod C++ tutorial", false);
     TCOD_key_t key = {TCODK_NONE,0};
+    TCOD_mouse_t mouse;
      
     auto root_console = TCODConsole::root;
     auto bar = new TCODConsole(SCREEN_WIDTH, Panel_height);
@@ -482,7 +505,7 @@ int main( int argc, char *argv[] ) {
     gui_log_message(TCOD_light_azure, "Welcome %s \nA throne is the most devious trap of them all..", player->name.c_str());
 
     while ( !TCODConsole::isWindowClosed() ) {
-        TCODSystem::checkForEvent(TCOD_EVENT_KEY_PRESS,&key,NULL);
+        TCODSystem::checkForEvent(TCOD_EVENT_KEY_PRESS | TCOD_EVENT_MOUSE, &key, &mouse);
 
         //// INPUT
         
@@ -559,7 +582,7 @@ int main( int argc, char *argv[] ) {
         for(auto &e : _event_queue) {
             switch(e.type) {
                 case EventType::Message: {
-                    gui_log_message(TCOD_amber, e.message.c_str());
+                    gui_log_message(e.color, e.message.c_str());
                     //printf("|| %s \n", e.message.c_str());
                     break;
                 }
@@ -572,7 +595,7 @@ int main( int argc, char *argv[] ) {
                         player->color = TCOD_dark_red;
                         player->render_order = render_priority.CORPSE;
                     } else {
-                        gui_log_message(TCOD_red, "%s died!", e.entity->name.c_str());
+                        gui_log_message(TCOD_light_green, "%s died!", e.entity->name.c_str());
                         e.entity->gfx = '%';
                         e.entity->color = TCOD_dark_red;
                         e.entity->render_order = render_priority.CORPSE;
@@ -623,11 +646,8 @@ int main( int argc, char *argv[] ) {
         bar->setDefaultBackground(TCODColor::black);
         bar->clear();
         gui_render_bar(bar, 1, 1, Bar_width, "HP", player->fighter->hp, player->fighter->hp_max, TCOD_light_red, TCOD_darker_red);
-//         +   render_bar(panel, 1, 1, bar_width, 'HP', player.fighter.hp, player.fighter.max_hp,
-// +              libtcod.light_red, libtcod.darker_red)
-        // root_console->setDefaultForeground(TCOD_white);
-        // root_console->printEx(1, SCREEN_HEIGHT - 2, TCOD_BKGND_NONE, TCOD_LEFT, "HP: %d/%d", player->fighter->hp, player->fighter->hp_max);
-        
+        gui_render_mouse_look(bar, mouse.cx, mouse.cy);
+
         float colorCoef = 0.4f;
         for(int i = 0, y = 1; i < gui_log.size(); i++, y++) {
             bar->setDefaultForeground(gui_log[i]->color * colorCoef);
