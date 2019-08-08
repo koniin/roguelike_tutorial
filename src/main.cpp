@@ -283,7 +283,10 @@ bool entity_at(int x, int y, Entity **found_entity) {
     return false;
 }
 
-
+bool can_walk(int x, int y) {
+    Entity *target;
+    return !map_blocked(x, y) && !entity_at(x, y, &target);
+}
 
 void move_towards(Entity *entity, int target_x, int target_y) {
     int dx, dy;
@@ -293,9 +296,13 @@ void move_towards(Entity *entity, int target_x, int target_y) {
     
     dx = (int)(round(dx/distance));
     dy = (int)(round(dy/distance));
-    Entity *target;
-    if(!map_blocked(entity->x + dx, entity->y + dy) && !entity_at(dx, dy, &target)) {
+
+    if(can_walk(entity->x + dx, entity->y + dy)) {
         entity->x = entity->x + dx;
+        entity->y = entity->y + dy;
+    } else if(can_walk(entity->x + dx, entity->y)) {
+        entity->x = entity->x + dx;
+    } else if(can_walk(entity->x, entity->y + dy)) {
         entity->y = entity->y + dy;
     }
 }
