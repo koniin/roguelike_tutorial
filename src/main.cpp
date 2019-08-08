@@ -40,24 +40,8 @@ struct Movement {
     int x, y;
 };
 
-struct Entity;
-
-struct Fighter {
-    int hp;
-    int hp_max;
-    int defense;
-    int power;
-
-    Fighter(int hp_, int defense_, int power_) {
-        hp = hp_;
-        defense = defense_;
-        power = power_;
-    }
-};
-
-struct Ai {
-    virtual void take_turn(Entity *target) = 0;
-};
+struct Fighter;
+struct Ai;
 
 struct Entity {
     int x,y;
@@ -75,6 +59,40 @@ struct Entity {
     Ai *ai = NULL;
 };
 
+struct Fighter {
+    int hp;
+    int hp_max;
+    int defense;
+    int power;
+    
+    Fighter(int hp_, int defense_, int power_) {
+        hp = hp_;
+        hp_max = hp_;
+        defense = defense_;
+        power = power_;
+    }
+
+    void take_damage(int amount) {
+        hp -= amount;
+    }
+
+    void attack(Entity *entity) {
+        int damage = power - entity->fighter->defense;
+
+        if(damage > 0) {
+            entity->fighter->take_damage(damage);
+            printf("%s attacks %s for %d hit points \n", "THIS", entity->name, damage);
+        } else {
+            printf("%s attacks %s but deals no damage \n", "THIS", entity->name);
+        }
+    }
+};
+
+struct Ai {
+    virtual void take_turn(Entity *target) = 0;
+};
+
+
 void move_towards(Entity *entity, int target_x, int target_y);
 float distance_to(int x, int y, int target_x, int target_y) {
     int dx = target_x - x;
@@ -87,9 +105,13 @@ struct BasicMonster : Ai {
     void take_turn(Entity *target) override {
         if(tcod_fov_map->isInFov(_owner->x, _owner->y)) {
             if(distance_to(_owner->x, _owner->y, target->x, target->y) >= 2) {
+
+                // CAN REPLACE HITS WITH ASTAR MOVEMENT
+
                 move_towards(_owner, target->x, target->y);
             } else if(target->fighter->hp > 0) {
-                printf("Deal damage to %s.\n", target->name);
+                _owner->fighter->attack(target);
+                //printf("Deal damage to %s.\n", target->name);
             }
 
         }
@@ -364,7 +386,8 @@ int main( int argc, char *argv[] ) {
         if(game_state == PLAYER_TURN && (m.x != 0 || m.y != 0) && !map_blocked(dx, dy)) {
             Entity *target;
             if(entity_at(dx, dy, &target)) {
-                printf("You kick the %s in the shins, much to its annoyance!", target->name);    
+                player->fighter->attack(target);
+                //printf("You kick the %s in the shins, much to its annoyance!", target->name);    
             } else {
                 player->x = dx;
                 player->y = dy;
