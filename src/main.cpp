@@ -1,5 +1,6 @@
 #include "libtcod.hpp"
 #include <iostream>
+#include <unordered_map>
 #include <time.h>
 #include <stdlib.h>
 
@@ -8,7 +9,10 @@
 
 // http://www.roguebasin.com/index.php?title=Complete_roguelike_tutorial_using_C%2B%2B_and_libtcod_-_part_2:_map_and_actors
 // 
-// These differ somewhat
+
+// ECS
+// https://blog.therocode.net/2018/08/simplest-entity-component-system
+// https://austinmorlan.com/posts/entity_component_system/
 
 int rand_int(int min, int max) {
     int lower = min;
@@ -35,16 +39,49 @@ struct Movement {
     int x, y;
 };
 
+struct Fighter {
+    int hp;
+    int hp_max;
+    int defense;
+    int power;
+
+    Fighter(int hp_, int defense_, int power_) {
+        hp = hp_;
+        defense = defense_;
+        power = power_;
+    }
+};
+
+struct Ai {
+    virtual void take_turn() = 0;
+};
+
 struct Entity {
     int x,y;
     int gfx;
     TCODColor color;
     char *name;
     bool blocks = false;
+
+    Entity(int x_, int y_, int gfx_, TCODColor color_, char *name_, bool blocks_) : 
+        x(x_), y(y_), gfx(gfx_), color(color_), name(name_), blocks(blocks_) {
+    }
+
+    // components
+    Fighter *fighter = NULL;
+    Ai *ai = NULL;
 };
-Entity entity_make(int x, int y, int gfx, TCODColor color, char *name, bool blocks) {
-    return { x, y, gfx, color, name, blocks };
-}
+
+struct BasicMonster : Ai {
+    Entity *_owner;
+    void take_turn() override {
+        printf("The %s wonders when it will get to move.\n", _owner->name);
+    }
+
+    BasicMonster(Entity *owner) {
+        _owner = owner;
+    }
+};
 
 struct Tile {
     bool blocked = true;
@@ -70,7 +107,7 @@ bool rect_intersects(const Rect &r, const Rect &other) {
 }
 
 const int MAX_ENTITIES = 1000;
-Entity _entities[MAX_ENTITIES];
+std::vector<Entity*> _entities;
 int _entity_count = 0; 
 
 const int Map_Width = 80;
@@ -192,8 +229,9 @@ void map_add_entities(int max_monsters_per_room) {
             int y = rand_int(room.y + 1, room.y2 - 1);
 
             bool occupied = false;
-            for(auto &e : _entities) {
-                if(e.x == x && e.y == y) {
+            for(int ei = 0; ei < _entity_count; ei++) {
+                Entity *e = _entities[ei];
+                if(e->x == x && e->y == y) {
                     occupied = true;
                     break;
                 }
@@ -202,21 +240,26 @@ void map_add_entities(int max_monsters_per_room) {
                 continue;
             }
 
-            Entity e;
+            Entity *e;
             if(rand_int(0, 100) < 80) {
-                e = { x, y, 'o', TCOD_desaturated_green, "Orc", true  };
+                e = new Entity(x, y, 'o', TCOD_desaturated_green, "Orc", true );
+                e->fighter = new Fighter(10, 0, 3);
+                e->ai = new BasicMonster(e);
             } else {
-                e = { x, y, 'T', TCOD_darker_green, "Troll", true };
+                e = new Entity(x, y, 'T', TCOD_darker_green, "Troll", true );
+                e->fighter = new Fighter(16, 1, 4);
+                e->ai = new BasicMonster(e);
             }
-            _entities[_entity_count++] = e;
+            _entities.push_back(e);
+            _entity_count++;
         }
     }
 }
 
-bool entity_at(int x, int y, Entity *found_entity) {
+bool entity_at(int x, int y, Entity **found_entity) {
     for(int i = 0; i < _entity_count; i++) {
-        auto &entity = _entities[i];
-        if(entity.blocks && x == entity.x && y == entity.y) {
+        auto entity = _entities[i];
+        if(entity->blocks && x == entity->x && y == entity->y) {
             *found_entity = _entities[i];
             return true;
         }
@@ -233,9 +276,12 @@ int main( int argc, char *argv[] ) {
      
     auto root_console = TCODConsole::root;
 
-    _entities[_entity_count++] = entity_make(SCREEN_WIDTH/2, SCREEN_HEIGHT/2, '@', TCODColor::white, "Player", true);
+    _entities.reserve(1000);
+    _entities.push_back(new Entity(SCREEN_WIDTH/2, SCREEN_HEIGHT/2, '@', TCODColor::white, "Player", true));
+    _entity_count++;
     
-    Entity &player = _entities[0];
+    Entity *player = _entities[0];
+    player->fighter = new Fighter(30, 2, 5);
     
     // generate map and fov
     tcod_fov_map = new TCODMap(Map_Width, Map_Height);
@@ -243,9 +289,9 @@ int main( int argc, char *argv[] ) {
     map_generate(Max_rooms, Room_min_size, Room_max_size, Map_Width, Map_Height);
     
     // Place player in first room
-    rect_center(rooms[0], player.x, player.y);
+    rect_center(rooms[0], player->x, player->y);
     // Setup fov from players position
-    tcod_fov_map->computeFov(player.x, player.y, fov_radius, fov_light_walls, fov_algorithm);
+    tcod_fov_map->computeFov(player->x, player->y, fov_radius, fov_light_walls, fov_algorithm);
 
     // add entities to map
     map_add_entities(Max_monsters_per_room);
@@ -274,23 +320,23 @@ int main( int argc, char *argv[] ) {
         
         //// UPDATE
 
-        int dx = player.x + m.x, dy = player.y + m.y;
+        int dx = player->x + m.x, dy = player->y + m.y;
         if(game_state == PLAYER_TURN && (m.x != 0 || m.y != 0) && !map_blocked(dx, dy)) {
-            Entity target;;
+            Entity *target;
             if(entity_at(dx, dy, &target)) {
-                printf("You kick the %s in the shins, much to its annoyance!", target.name);    
+                printf("You kick the %s in the shins, much to its annoyance!", target->name);    
             } else {
-                player.x = dx;
-                player.y = dy;
-                tcod_fov_map->computeFov(player.x, player.y, fov_radius, fov_light_walls, fov_algorithm);
+                player->x = dx;
+                player->y = dy;
+                tcod_fov_map->computeFov(player->x, player->y, fov_radius, fov_light_walls, fov_algorithm);
             }
 
             game_state = ENEMY_TURN;
         } else if(game_state == ENEMY_TURN) {
             for(int i = 1; i < _entity_count; i++) {
-                const auto &entity = _entities[i];
+                const auto entity = _entities[i];
                 
-                printf("The %s ponders the meaning of its existence.\n", entity.name);
+                printf("The %s ponders the meaning of its existence.\n", entity->name);
             }
 
            game_state = PLAYER_TURN;
@@ -316,12 +362,12 @@ int main( int argc, char *argv[] ) {
         }
 
         for(int i = 0; i < _entity_count; i++) {
-            const auto &entity = _entities[i];
-            if(!tcod_fov_map->isInFov(entity.x, entity.y)) {
+            const auto entity = _entities[i];
+            if(!tcod_fov_map->isInFov(entity->x, entity->y)) {
                 continue;
             }
-            root_console->setDefaultForeground(entity.color);
-            root_console->putChar(entity.x, entity.y, entity.gfx);
+            root_console->setDefaultForeground(entity->color);
+            root_console->putChar(entity->x, entity->y, entity->gfx);
         }
         
         TCODConsole::flush();
