@@ -39,6 +39,7 @@ struct Colors {
 } color_table;
 
 enum GameState {
+    PLAYER_DEAD,
     PLAYER_TURN,
     ENEMY_TURN
 } game_state;
@@ -70,10 +71,10 @@ struct Entity {
     int x,y;
     int gfx;
     TCODColor color;
-    char *name;
+    std::string name;
     bool blocks = false;
 
-    Entity(int x_, int y_, int gfx_, TCODColor color_, char *name_, bool blocks_) : 
+    Entity(int x_, int y_, int gfx_, TCODColor color_, std::string name_, bool blocks_) : 
         x(x_), y(y_), gfx(gfx_), color(color_), name(name_), blocks(blocks_) {
     }
 
@@ -107,12 +108,12 @@ struct Fighter {
             entity->fighter->take_damage(damage);    
             // VERY SHITTY STRING ALLOCATION    
             char buffer[255];
-            sprintf(buffer, "%s attacks %s for %d hit points", _owner->name, entity->name, damage);
+            sprintf(buffer, "%s attacks %s for %d hit points", _owner->name.c_str(), entity->name.c_str(), damage);
             events_queue({ EventType::Message, NULL, buffer });
         } else {
             // VERY SHITTY STRING ALLOCATION
             char buffer[255];
-            sprintf(buffer, "%s attacks %s but deals no damage", _owner->name, entity->name);
+            sprintf(buffer, "%s attacks %s but deals no damage", _owner->name.c_str(), entity->name.c_str());
             events_queue({ EventType::Message, NULL, buffer });
         }
     }
@@ -375,6 +376,10 @@ int main( int argc, char *argv[] ) {
     Entity *player = _entities[0];
     player->fighter = new Fighter(player, 30, 2, 5);
     
+    if(player == _entities[0]) {
+        printf("EQUALS?\n");
+    }
+
     // generate map and fov
     tcod_fov_map = new TCODMap(Map_Width, Map_Height);
     // Should separate fov from map_generate (make_room)
@@ -456,7 +461,9 @@ int main( int argc, char *argv[] ) {
         } else if(game_state == ENEMY_TURN) {
             for(int i = 1; i < _entity_count; i++) {
                 const auto entity = _entities[i];
-                entity->ai->take_turn(player);
+                if(entity->ai) {
+                    entity->ai->take_turn(player);
+                }
                 //printf("The %s ponders the meaning of its existence.\n", entity->name);
             }
 
@@ -471,7 +478,23 @@ int main( int argc, char *argv[] ) {
                     break;
                 }
                 case EventType::EntityDead: {
-                    printf("|| some poor fucker died! \n");
+                    // shitty way to know if player died
+                    if(e.entity == _entities[0]) {
+                        printf("|| YOU died! \n");
+                        game_state = PLAYER_DEAD;
+                        _entities[0]->gfx = '%';
+                        _entities[0]->color = TCOD_dark_red;
+                    } else {
+                        printf("|| %s died! \n", e.entity->name.c_str());
+                        e.entity->gfx = '%';
+                        e.entity->color = TCOD_dark_red;
+                        e.entity->blocks = false;
+                        delete e.entity->fighter;
+                        e.entity->fighter = NULL;
+                        delete e.entity->ai;
+                        e.entity->ai = NULL;
+                        e.entity->name = "remains of " + e.entity->name;                    
+                    }
                     break;
                 }
             }
@@ -506,6 +529,14 @@ int main( int argc, char *argv[] ) {
             root_console->putChar(entity->x, entity->y, entity->gfx);
         }
         
+        if(game_state == PLAYER_DEAD) {
+            root_console->setDefaultForeground(TCOD_red);
+            root_console->putChar(1, 1, 'D');
+            root_console->putChar(1, 2, 'E');
+            root_console->putChar(1, 3, 'A');
+            root_console->putChar(1, 4, 'D');
+        }
+
         TCODConsole::flush();
     }
 
