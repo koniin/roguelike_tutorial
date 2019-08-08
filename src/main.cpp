@@ -105,11 +105,12 @@ struct Fighter {
         int damage = power - entity->fighter->defense;
 
         if(damage > 0) {
-            entity->fighter->take_damage(damage);    
-            // VERY SHITTY STRING ALLOCATION    
+            // VERY SHITTY STRING ALLOCATION
             char buffer[255];
             sprintf(buffer, "%s attacks %s for %d hit points", _owner->name.c_str(), entity->name.c_str(), damage);
             events_queue({ EventType::Message, NULL, buffer });
+
+            entity->fighter->take_damage(damage);
         } else {
             // VERY SHITTY STRING ALLOCATION
             char buffer[255];
@@ -178,7 +179,6 @@ bool rect_intersects(const Rect &r, const Rect &other) {
 
 const int MAX_ENTITIES = 1000;
 std::vector<Entity*> _entities;
-int _entity_count = 0; 
 
 const int Map_Width = 80;
 const int Map_Height = 50;
@@ -298,7 +298,7 @@ void map_add_entities(int max_monsters_per_room) {
             int y = rand_int(room.y + 1, room.y2 - 1);
 
             bool occupied = false;
-            for(int ei = 0; ei < _entity_count; ei++) {
+            for(int ei = 0; ei < _entities.size(); ei++) {
                 Entity *e = _entities[ei];
                 if(e->x == x && e->y == y) {
                     occupied = true;
@@ -319,14 +319,13 @@ void map_add_entities(int max_monsters_per_room) {
                 e->fighter = new Fighter(e, 16, 1, 4);
                 e->ai = new BasicMonster(e);
             }
-            _entities.push_back(e);
-            _entity_count++;
+            _entities.push_back(e);            
         }
     }
 }
 
 bool entity_at(int x, int y, Entity **found_entity) {
-    for(int i = 0; i < _entity_count; i++) {
+    for(int i = 0; i < _entities.size(); i++) {
         auto entity = _entities[i];
         if(entity->blocks && x == entity->x && y == entity->y) {
             *found_entity = _entities[i];
@@ -360,6 +359,10 @@ void move_towards(Entity *entity, int target_x, int target_y) {
     }
 }
 
+bool entity_render_sort(const Entity *first, const Entity *second) {
+    return first->blocks < second->blocks;
+}
+
 int main( int argc, char *argv[] ) {
     srand((unsigned int)time(NULL));
 
@@ -369,17 +372,12 @@ int main( int argc, char *argv[] ) {
      
     auto root_console = TCODConsole::root;
 
-    _entities.reserve(1000);
+    // _entities.reserve(1000);
     _entities.push_back(new Entity(SCREEN_WIDTH/2, SCREEN_HEIGHT/2, '@', TCODColor::white, "Player", true));
-    _entity_count++;
     
     Entity *player = _entities[0];
     player->fighter = new Fighter(player, 30, 2, 5);
     
-    if(player == _entities[0]) {
-        printf("EQUALS?\n");
-    }
-
     // generate map and fov
     tcod_fov_map = new TCODMap(Map_Width, Map_Height);
     // Should separate fov from map_generate (make_room)
@@ -459,12 +457,11 @@ int main( int argc, char *argv[] ) {
 
             game_state = ENEMY_TURN;
         } else if(game_state == ENEMY_TURN) {
-            for(int i = 1; i < _entity_count; i++) {
+            for(int i = 1; i < _entities.size(); i++) {
                 const auto entity = _entities[i];
                 if(entity->ai) {
                     entity->ai->take_turn(player);
                 }
-                //printf("The %s ponders the meaning of its existence.\n", entity->name);
             }
 
            game_state = PLAYER_TURN;
@@ -479,11 +476,11 @@ int main( int argc, char *argv[] ) {
                 }
                 case EventType::EntityDead: {
                     // shitty way to know if player died
-                    if(e.entity == _entities[0]) {
+                    if(e.entity == player) {
                         printf("|| YOU died! \n");
                         game_state = PLAYER_DEAD;
-                        _entities[0]->gfx = '%';
-                        _entities[0]->color = TCOD_dark_red;
+                        player->gfx = '%';
+                        player->color = TCOD_dark_red;
                     } else {
                         printf("|| %s died! \n", e.entity->name.c_str());
                         e.entity->gfx = '%';
@@ -520,7 +517,9 @@ int main( int argc, char *argv[] ) {
             }
         }
 
-        for(int i = 0; i < _entity_count; i++) {
+        std::sort(_entities.begin(), _entities.end(), entity_render_sort);
+
+        for(int i = 0; i < _entities.size(); i++) {
             const auto entity = _entities[i];
             if(!tcod_fov_map->isInFov(entity->x, entity->y)) {
                 continue;
@@ -528,6 +527,9 @@ int main( int argc, char *argv[] ) {
             root_console->setDefaultForeground(entity->color);
             root_console->putChar(entity->x, entity->y, entity->gfx);
         }
+
+        root_console->setDefaultForeground(TCOD_white);
+        root_console->printEx(1, SCREEN_HEIGHT - 2, TCOD_BKGND_NONE, TCOD_LEFT, "HP: %d/%d", player->fighter->hp, player->fighter->hp_max);
         
         if(game_state == PLAYER_DEAD) {
             root_console->setDefaultForeground(TCOD_red);
