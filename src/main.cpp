@@ -479,6 +479,8 @@ int main( int argc, char *argv[] ) {
 
     game_state = PLAYER_TURN;
 
+    gui_log_message(TCOD_light_azure, "Welcome %s \nA throne is the most devious trap of them all..", player->name.c_str());
+
     while ( !TCODConsole::isWindowClosed() ) {
         TCODSystem::checkForEvent(TCOD_EVENT_KEY_PRESS,&key,NULL);
 
