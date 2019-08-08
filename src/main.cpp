@@ -4,6 +4,13 @@
 #include <time.h>
 #include <stdlib.h>
 
+
+// http://rogueliketutorials.com/tutorials/tcod/part-6/
+// WE ARE AT: "Now we can attack enemies, and they can attack us!"
+
+// Skipped things:
+// - A* movement for monsters (Part 6)
+
 // 
 // http://rogueliketutorials.com/tutorials/tcod/part-6/
 
@@ -36,6 +43,22 @@ enum GameState {
     ENEMY_TURN
 } game_state;
 
+enum EventType {
+    Message,
+    EntityDead
+};
+struct Entity;
+struct Event {
+    EventType type;
+    Entity *entity = NULL;
+    std::string message;
+};
+
+std::vector<Event> _event_queue; 
+void events_queue(const Event e) {
+    _event_queue.push_back(e);
+}
+
 struct Movement {
     int x, y;
 };
@@ -64,26 +87,33 @@ struct Fighter {
     int hp_max;
     int defense;
     int power;
+    Entity *_owner;
     
-    Fighter(int hp_, int defense_, int power_) {
-        hp = hp_;
-        hp_max = hp_;
-        defense = defense_;
-        power = power_;
-    }
+    Fighter(Entity* owner, int hp_, int defense_, int power_) 
+        : hp(hp_), hp_max(hp_), defense(defense_), power(power_), _owner(owner) {}
 
     void take_damage(int amount) {
         hp -= amount;
+
+        if(hp <= 0) {
+            events_queue({ EventType::EntityDead, _owner });
+        }
     }
 
     void attack(Entity *entity) {
         int damage = power - entity->fighter->defense;
 
         if(damage > 0) {
-            entity->fighter->take_damage(damage);
-            printf("%s attacks %s for %d hit points \n", "THIS", entity->name, damage);
+            entity->fighter->take_damage(damage);    
+            // VERY SHITTY STRING ALLOCATION    
+            char buffer[255];
+            sprintf(buffer, "%s attacks %s for %d hit points", _owner->name, entity->name, damage);
+            events_queue({ EventType::Message, NULL, buffer });
         } else {
-            printf("%s attacks %s but deals no damage \n", "THIS", entity->name);
+            // VERY SHITTY STRING ALLOCATION
+            char buffer[255];
+            sprintf(buffer, "%s attacks %s but deals no damage", _owner->name, entity->name);
+            events_queue({ EventType::Message, NULL, buffer });
         }
     }
 };
@@ -281,11 +311,11 @@ void map_add_entities(int max_monsters_per_room) {
             Entity *e;
             if(rand_int(0, 100) < 80) {
                 e = new Entity(x, y, 'o', TCOD_desaturated_green, "Orc", true );
-                e->fighter = new Fighter(10, 0, 3);
+                e->fighter = new Fighter(e, 10, 0, 3);
                 e->ai = new BasicMonster(e);
             } else {
                 e = new Entity(x, y, 'T', TCOD_darker_green, "Troll", true );
-                e->fighter = new Fighter(16, 1, 4);
+                e->fighter = new Fighter(e, 16, 1, 4);
                 e->ai = new BasicMonster(e);
             }
             _entities.push_back(e);
@@ -343,7 +373,7 @@ int main( int argc, char *argv[] ) {
     _entity_count++;
     
     Entity *player = _entities[0];
-    player->fighter = new Fighter(30, 2, 5);
+    player->fighter = new Fighter(player, 30, 2, 5);
     
     // generate map and fov
     tcod_fov_map = new TCODMap(Map_Width, Map_Height);
@@ -366,19 +396,47 @@ int main( int argc, char *argv[] ) {
         //// INPUT
         
         Movement m = { 0, 0 };
-        switch(key.vk) {
-            case TCODK_UP : m.y = -1; break;
-            case TCODK_DOWN : m.y = 1; break;
-            case TCODK_LEFT : m.x = -1; break;
-            case TCODK_RIGHT : m.x = 1; break;
-            case TCODK_ESCAPE : return 0;
-            case TCODK_ENTER: {
-                if(key.lalt) {
-                    TCODConsole::setFullscreen(!TCODConsole::isFullscreen());
-                }
+        if(key.vk == TCODK_UP) {
+            m.y = -1;
+        } else if(key.vk == TCODK_DOWN) {
+            m.y = 1;
+        } else if(key.vk == TCODK_LEFT) {
+            m.x = -1;
+        } else if(key.vk == TCODK_RIGHT) {
+            m.x = 1;
+        } else if(key.c == 'r') {
+            m.x = 1;
+            m.y = -1;
+        } else if(key.c == 'e') {
+            m.x = -1;
+            m.y = -1;
+        } else if(key.c == 'd') {
+            m.x = -1;
+            m.y = 1;
+        } else if(key.c == 'f') {
+            m.x = 1;
+            m.y = 1;
+        } else if(key.vk == TCODK_ESCAPE) {
+            return 0;
+        } else if(key.vk == TCODK_ENTER) {
+            if(key.lalt) {
+                TCODConsole::setFullscreen(!TCODConsole::isFullscreen());
             }
-            default:break;
-        }
+        } 
+
+        // switch(key.vk) {
+        //     case TCODK_UP : m.y = -1; break;
+        //     case TCODK_DOWN : m.y = 1; break;
+        //     case TCODK_LEFT : m.x = -1; break;
+        //     case TCODK_RIGHT : m.x = 1; break;
+        //     case TCODK_ESCAPE : return 0;
+        //     case TCODK_ENTER: {
+        //         if(key.lalt) {
+        //             TCODConsole::setFullscreen(!TCODConsole::isFullscreen());
+        //         }
+        //     }
+        //     default:break;
+        // }
         
         //// UPDATE
 
@@ -404,6 +462,21 @@ int main( int argc, char *argv[] ) {
 
            game_state = PLAYER_TURN;
         }
+
+        // EVENTS
+        for(auto &e : _event_queue) {
+            switch(e.type) {
+                case EventType::Message: {
+                    printf("|| %s \n", e.message.c_str());
+                    break;
+                }
+                case EventType::EntityDead: {
+                    printf("|| some poor fucker died! \n");
+                    break;
+                }
+            }
+        }
+        _event_queue.clear();
 
         //// RENDER
 
