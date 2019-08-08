@@ -5,8 +5,7 @@
 #include <stdlib.h>
 
 
-// http://rogueliketutorials.com/tutorials/tcod/part-6/
-// WE ARE AT: "Now we can attack enemies, and they can attack us!"
+// http://rogueliketutorials.com/tutorials/tcod/part-7/
 
 // Skipped things:
 // - A* movement for monsters (Part 6)
@@ -68,6 +67,7 @@ struct Fighter;
 struct Ai;
 
 struct RenderPriority {
+    // lower is lower prio
     int CORPSE = 0;
     int ENTITY = 1;
 } render_priority;
@@ -183,11 +183,17 @@ bool rect_intersects(const Rect &r, const Rect &other) {
         r.y <= other.y2 && r.y2 >= other.y;
 }
 
+// UI
+const int Bar_width = 20;
+const int Panel_height = 7;
+const int Panel_y = SCREEN_HEIGHT - Panel_height;
+//
+
 const int MAX_ENTITIES = 1000;
 std::vector<Entity*> _entities;
 
 const int Map_Width = 80;
-const int Map_Height = 50;
+const int Map_Height = 43;
 const int Room_max_size = 10;
 const int Room_min_size = 6;
 const int Max_rooms = 30;
@@ -233,6 +239,7 @@ void map_make_h_tunnel(int x1, int x2, int y) {
     for(int x = std::min(x1, x2); x < std::max(x1, x2) + 1; x++) {
         _map[map_index(x, y)].blocked = false;
         _map[map_index(x, y)].block_sight = false;
+        tcod_fov_map->setProperties(x, y, true, true);
     }
 //     def create_h_tunnel(self, x1, x2, y):
 // +       for x in range(min(x1, x2), max(x1, x2) + 1):
@@ -243,6 +250,7 @@ void map_make_v_tunnel(int y1, int y2, int x) {
     for(int y = std::min(y1, y2); y < std::max(y1, y2) + 1; y++) {
         _map[map_index(x, y)].blocked = false;
         _map[map_index(x, y)].block_sight = false;
+        tcod_fov_map->setProperties(x, y, true, true);
     }
 // +   def create_v_tunnel(self, y1, y2, x):
 // +       for y in range(min(y1, y2), max(y1, y2) + 1):
@@ -369,6 +377,33 @@ bool entity_render_sort(const Entity *first, const Entity *second) {
     return first->render_order < second->render_order;
 }
 
+void render_bar(TCODConsole *panel, int x, int y, int total_width, std::string name, 
+                    int value, int maximum, TCOD_color_t bar_color, TCOD_color_t back_color) {
+    int bar_width = int(float(value) / maximum * total_width);
+
+    panel->setDefaultBackground(back_color);
+    panel->rect(x, y, total_width, 1, false, TCOD_BKGND_SCREEN);
+
+    panel->setDefaultBackground(bar_color);
+    if(bar_width > 0) {
+        panel->rect(x, y, bar_width, 1, false, TCOD_BKGND_SCREEN);
+    }
+
+    panel->setDefaultForeground(TCOD_white);
+    panel->printEx(x + total_width / 2, y, TCOD_BKGND_NONE, TCOD_CENTER, "%s: %d/%d", name.c_str(), value, maximum);
+
+    // TCOD_console_set_default_background(panel, back_color);
+    // TCOD_console_rect(panel, x, y, total_width, 1, false, TCOD_BKGND_SCREEN);
+
+    // TCOD_console_set_default_background(panel, bar_color);
+    // if(bar_width > 0) {
+    //     TCOD_console_rect(panel, x, y, bar_width, 1, false, TCOD_BKGND_SCREEN);
+    // }
+
+    // TCOD_console_set_default_foreground(panel, TCOD_white);
+    // TCOD_console_print_ex(panel, x + total_width / 2, y, TCOD_BKGND_NONE, TCOD_CENTER, "%s: %d/%d", name.c_str(), value, maximum);
+}
+
 int main( int argc, char *argv[] ) {
     srand((unsigned int)time(NULL));
 
@@ -377,6 +412,7 @@ int main( int argc, char *argv[] ) {
     TCOD_key_t key = {TCODK_NONE,0};
      
     auto root_console = TCODConsole::root;
+    auto bar = new TCODConsole(SCREEN_WIDTH, Panel_height);
 
     // _entities.reserve(1000);
     _entities.push_back(new Entity(SCREEN_WIDTH/2, SCREEN_HEIGHT/2, '@', TCODColor::white, "Player", true, render_priority.ENTITY));
@@ -536,9 +572,17 @@ int main( int argc, char *argv[] ) {
             root_console->putChar(entity->x, entity->y, entity->gfx);
         }
 
-        root_console->setDefaultForeground(TCOD_white);
-        root_console->printEx(1, SCREEN_HEIGHT - 2, TCOD_BKGND_NONE, TCOD_LEFT, "HP: %d/%d", player->fighter->hp, player->fighter->hp_max);
+        // UI RENDER
+        bar->setDefaultBackground(TCODColor::black);
+        bar->clear();
+        render_bar(bar, 1, 1, Bar_width, "HP", player->fighter->hp, player->fighter->hp_max, TCOD_light_red, TCOD_darker_red);
+//         +   render_bar(panel, 1, 1, bar_width, 'HP', player.fighter.hp, player.fighter.max_hp,
+// +              libtcod.light_red, libtcod.darker_red)
+        // root_console->setDefaultForeground(TCOD_white);
+        // root_console->printEx(1, SCREEN_HEIGHT - 2, TCOD_BKGND_NONE, TCOD_LEFT, "HP: %d/%d", player->fighter->hp, player->fighter->hp_max);
         
+        TCODConsole::blit(bar, 0, 0, SCREEN_WIDTH, Panel_height, root_console, 0, Panel_y);
+
         if(game_state == PLAYER_DEAD) {
             root_console->setDefaultForeground(TCOD_red);
             root_console->putChar(1, 1, 'D');
