@@ -6,7 +6,7 @@
 #include <stdarg.h>
 
 
-// http://rogueliketutorials.com/tutorials/tcod/part-7/
+// http://rogueliketutorials.com/tutorials/tcod/part-8/
 
 // Skipped things:
 // - A* movement for monsters (Part 6)
