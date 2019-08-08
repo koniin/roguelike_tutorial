@@ -67,15 +67,21 @@ struct Movement {
 struct Fighter;
 struct Ai;
 
+struct RenderPriority {
+    int CORPSE = 0;
+    int ENTITY = 1;
+} render_priority;
+
 struct Entity {
     int x,y;
     int gfx;
     TCODColor color;
     std::string name;
     bool blocks = false;
+    int render_order = 0;
 
-    Entity(int x_, int y_, int gfx_, TCODColor color_, std::string name_, bool blocks_) : 
-        x(x_), y(y_), gfx(gfx_), color(color_), name(name_), blocks(blocks_) {
+    Entity(int x_, int y_, int gfx_, TCODColor color_, std::string name_, bool blocks_, int render_order_) : 
+        x(x_), y(y_), gfx(gfx_), color(color_), name(name_), blocks(blocks_), render_order(render_order_) {
     }
 
     // components
@@ -311,11 +317,11 @@ void map_add_entities(int max_monsters_per_room) {
 
             Entity *e;
             if(rand_int(0, 100) < 80) {
-                e = new Entity(x, y, 'o', TCOD_desaturated_green, "Orc", true );
+                e = new Entity(x, y, 'o', TCOD_desaturated_green, "Orc", true, render_priority.ENTITY );
                 e->fighter = new Fighter(e, 10, 0, 3);
                 e->ai = new BasicMonster(e);
             } else {
-                e = new Entity(x, y, 'T', TCOD_darker_green, "Troll", true );
+                e = new Entity(x, y, 'T', TCOD_darker_green, "Troll", true, render_priority.ENTITY );
                 e->fighter = new Fighter(e, 16, 1, 4);
                 e->ai = new BasicMonster(e);
             }
@@ -360,7 +366,7 @@ void move_towards(Entity *entity, int target_x, int target_y) {
 }
 
 bool entity_render_sort(const Entity *first, const Entity *second) {
-    return first->blocks < second->blocks;
+    return first->render_order < second->render_order;
 }
 
 int main( int argc, char *argv[] ) {
@@ -373,7 +379,7 @@ int main( int argc, char *argv[] ) {
     auto root_console = TCODConsole::root;
 
     // _entities.reserve(1000);
-    _entities.push_back(new Entity(SCREEN_WIDTH/2, SCREEN_HEIGHT/2, '@', TCODColor::white, "Player", true));
+    _entities.push_back(new Entity(SCREEN_WIDTH/2, SCREEN_HEIGHT/2, '@', TCODColor::white, "Player", true, render_priority.ENTITY));
     
     Entity *player = _entities[0];
     player->fighter = new Fighter(player, 30, 2, 5);
@@ -481,10 +487,12 @@ int main( int argc, char *argv[] ) {
                         game_state = PLAYER_DEAD;
                         player->gfx = '%';
                         player->color = TCOD_dark_red;
+                        player->render_order = render_priority.CORPSE;
                     } else {
                         printf("|| %s died! \n", e.entity->name.c_str());
                         e.entity->gfx = '%';
                         e.entity->color = TCOD_dark_red;
+                        e.entity->render_order = render_priority.CORPSE;
                         e.entity->blocks = false;
                         delete e.entity->fighter;
                         e.entity->fighter = NULL;
