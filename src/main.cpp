@@ -13,6 +13,7 @@
 // ECS
 // https://blog.therocode.net/2018/08/simplest-entity-component-system
 // https://austinmorlan.com/posts/entity_component_system/
+TCODMap *tcod_fov_map;
 
 int rand_int(int min, int max) {
     int lower = min;
@@ -39,6 +40,8 @@ struct Movement {
     int x, y;
 };
 
+struct Entity;
+
 struct Fighter {
     int hp;
     int hp_max;
@@ -53,7 +56,7 @@ struct Fighter {
 };
 
 struct Ai {
-    virtual void take_turn() = 0;
+    virtual void take_turn(Entity *target) = 0;
 };
 
 struct Entity {
@@ -72,10 +75,24 @@ struct Entity {
     Ai *ai = NULL;
 };
 
+void move_towards(Entity *entity, int target_x, int target_y);
+float distance_to(int x, int y, int target_x, int target_y) {
+    int dx = target_x - x;
+    int dy = target_y - y;
+    return sqrtf(dx*dx + dy*dy);
+}
+
 struct BasicMonster : Ai {
     Entity *_owner;
-    void take_turn() override {
-        printf("The %s wonders when it will get to move.\n", _owner->name);
+    void take_turn(Entity *target) override {
+        if(tcod_fov_map->isInFov(_owner->x, _owner->y)) {
+            if(distance_to(_owner->x, _owner->y, target->x, target->y) >= 2) {
+                move_towards(_owner, target->x, target->y);
+            } else if(target->fighter->hp > 0) {
+                printf("Deal damage to %s.\n", target->name);
+            }
+
+        }
     }
 
     BasicMonster(Entity *owner) {
@@ -124,7 +141,6 @@ const TCOD_fov_algorithm_t fov_algorithm = FOV_BASIC;
 const bool fov_light_walls = true;
 const int fov_radius = 10;
 bool fov_recompute = true;
-TCODMap *tcod_fov_map;
 
 const int Max_monsters_per_room = 3;
 
@@ -267,6 +283,23 @@ bool entity_at(int x, int y, Entity **found_entity) {
     return false;
 }
 
+
+
+void move_towards(Entity *entity, int target_x, int target_y) {
+    int dx, dy;
+    dx = target_x - entity->x;
+    dy = target_y - entity->y;
+    float distance = sqrtf(dx*dx+dy*dy);
+    
+    dx = (int)(round(dx/distance));
+    dy = (int)(round(dy/distance));
+    Entity *target;
+    if(!map_blocked(entity->x + dx, entity->y + dy) && !entity_at(dx, dy, &target)) {
+        entity->x = entity->x + dx;
+        entity->y = entity->y + dy;
+    }
+}
+
 int main( int argc, char *argv[] ) {
     srand((unsigned int)time(NULL));
 
@@ -335,8 +368,8 @@ int main( int argc, char *argv[] ) {
         } else if(game_state == ENEMY_TURN) {
             for(int i = 1; i < _entity_count; i++) {
                 const auto entity = _entities[i];
-                
-                printf("The %s ponders the meaning of its existence.\n", entity->name);
+                entity->ai->take_turn(player);
+                //printf("The %s ponders the meaning of its existence.\n", entity->name);
             }
 
            game_state = PLAYER_TURN;
