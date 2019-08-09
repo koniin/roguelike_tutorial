@@ -533,6 +533,68 @@ void gui_render_mouse_look(TCODConsole *con, int mouse_x, int mouse_y) {
     con->print(1, 0, name_list.c_str());
 }
 
+enum LogStatus {
+    Information,
+    Warning,
+    Error
+};
+
+void engine_log(const LogStatus &status, const std::string &message) {
+    static const std::string delimiter = "|";
+    switch(status) {
+        case Information: printf("INFO %s %s", delimiter.c_str(), message.c_str()); break;
+        case Warning: printf("WARN %s %s", delimiter.c_str(), message.c_str()); break; 
+        case Error: printf("ERRO %s %s", delimiter.c_str(), message.c_str()); break;
+    }
+}
+
+TCODConsole *menu;
+void gui_render_menu(TCODConsole *con, std::string header, const std::vector<std::string> &options, 
+    int width, int screen_width, int screen_height) {
+    if(options.size() > 26) {
+        engine_log(LogStatus::Error, "Cannot have a menu with more than 26 options");
+    }
+    
+    // calculate total height for the header (after auto-wrap) and one line per option
+    int header_height = con->getHeightRect(0, 0, width, screen_height, header.c_str());
+    int height = options.size() + header_height;
+
+    // create an off-screen console that represents the menu's window
+    // SEEMS REALLY BAD TO KEEP CREATING NEW CONSOLE INSTANCES
+    if(menu) {
+        delete menu;
+    } 
+    menu = new TCODConsole(width, height);
+
+    // # print the header, with auto-wrap
+    menu->setDefaultForeground(TCOD_white);
+    menu->printRectEx(0, 0, width, height, TCOD_BKGND_NONE, TCOD_LEFT, header.c_str());
+
+    int y = header_height;
+    char letter_index = 'a';
+    for(auto &o : options) {        
+        menu->printEx(0, y, TCOD_BKGND_NONE, TCOD_LEFT, "(%c) %s", letter_index, o.c_str());
+        y++;
+        letter_index++;
+    }
+
+    int x = int(screen_width / 2 - width / 2);
+    int y = int(screen_height / 2 - height / 2);
+    TCODConsole::blit(menu, 0, 0, width, height, con, x, y, 1.0, 0.7);
+}
+
+void gui_render_inventory() {
+inventory_menu(con, header, inventory, inventory_width, screen_width, screen_height):
++   # show a menu with each item of the inventory as an option
++   if len(inventory.items) == 0:
++       options = ['Inventory is empty.']
++   else:
++       options = [item.name for item in inventory.items]
++
++   menu(con, header, options, inventory_width, screen_width, screen_height)
+
+}
+
 int main( int argc, char *argv[] ) {
     srand((unsigned int)time(NULL));
 
