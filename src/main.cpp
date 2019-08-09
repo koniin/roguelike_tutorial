@@ -46,7 +46,8 @@ enum GameState {
 
 enum EventType {
     Message,
-    EntityDead
+    EntityDead,
+    ItemPickup
 };
 struct Entity;
 struct Event {
@@ -54,6 +55,10 @@ struct Event {
     Entity *entity = NULL;
     std::string message;
     TCOD_color_t color;
+
+    static Event ItemPickup(Entity *entity) {
+        return { EventType::ItemPickup, entity };
+    }
 };
 
 std::vector<Event> _event_queue; 
@@ -67,11 +72,14 @@ struct Movement {
 
 struct Fighter;
 struct Ai;
+struct Inventory;
+struct Item;
 
 struct RenderPriority {
     // lower is lower prio
     int CORPSE = 0;
-    int ENTITY = 1;
+    int ITEM = 1;
+    int ENTITY = 2;
 } render_priority;
 
 struct Entity {
@@ -89,6 +97,30 @@ struct Entity {
     // components
     Fighter *fighter = NULL;
     Ai *ai = NULL;
+    Inventory *inventory = NULL;
+    Item *item = NULL;
+};
+
+struct Item {
+    std::string name;
+};
+
+struct Inventory {
+    int capacity;
+    std::vector<Item> items;
+    Inventory(int capacity) : capacity(capacity) {}
+
+    void add_item(const Item &i) {
+        if(items.size() >= capacity) {
+            events_queue({ EventType::Message, NULL, "You cannot carry anymore, inventory full", TCOD_yellow });
+        } else {
+            // VERY SHITTY STRING ALLOCATION
+            char buffer[128];
+            sprintf(buffer, "You pick up the %s", i.name.c_str());
+            events_queue({ EventType::Message, NULL, buffer, TCOD_blue });
+            items.push_back(i);
+        }
+    }
 };
 
 struct Fighter {
@@ -210,6 +242,7 @@ const int fov_radius = 10;
 bool fov_recompute = true;
 
 const int Max_monsters_per_room = 3;
+const int Max_items_per_room = 2;
 
 int map_index(int x, int y) {
     return x + Map_Width * y;
@@ -306,7 +339,7 @@ void map_generate(int max_rooms, int room_min_size, int room_max_size, int map_w
     }
 }
 
-void map_add_entities(int max_monsters_per_room) {
+void map_add_monsters(int max_monsters_per_room) {
     for(const Rect &room : rooms) {
         int number_of_monsters = rand_int(0, max_monsters_per_room);
         for(int i = 0; i < number_of_monsters; i++) {
@@ -340,10 +373,40 @@ void map_add_entities(int max_monsters_per_room) {
     }
 }
 
-bool entity_at(int x, int y, Entity **found_entity) {
+void map_add_items(int max_items_per_room) {
+    for(const Rect &room : rooms) {
+        int number_of_monsters = rand_int(0, max_items_per_room);
+        for(int i = 0; i < number_of_monsters; i++) {
+            int x = rand_int(room.x + 1, room.x2 - 1); 
+            int y = rand_int(room.y + 1, room.y2 - 1);
+
+            bool occupied = false;
+            for(int ei = 0; ei < _entities.size(); ei++) {
+                Entity *e = _entities[ei];
+                if(e->x == x && e->y == y) {
+                    occupied = true;
+                    break;
+                }
+            }
+            if(occupied) {
+                continue;
+            }
+
+            // We probably want some other way of generating the item etc
+            // so this will change in the future anyway
+            Entity *e;
+            e = new Entity(x, y, '!', TCOD_violet, "Health potion", false, render_priority.ITEM );
+            e->item = new Item();
+            e->item->name = "Health potion";
+            _entities.push_back(e);            
+        }
+    }
+}
+
+bool entity_blocking_at(int x, int y, Entity **found_entity) {
     for(int i = 0; i < _entities.size(); i++) {
         auto entity = _entities[i];
-        if(entity->blocks && x == entity->x && y == entity->y) {
+        if(x == entity->x && y == entity->y && entity->blocks) {
             *found_entity = _entities[i];
             return true;
         }
@@ -353,7 +416,7 @@ bool entity_at(int x, int y, Entity **found_entity) {
 
 bool can_walk(int x, int y) {
     Entity *target;
-    return !map_blocked(x, y) && !entity_at(x, y, &target);
+    return !map_blocked(x, y) && !entity_blocking_at(x, y, &target);
 }
 
 void move_towards(Entity *entity, int target_x, int target_y) {
@@ -486,6 +549,7 @@ int main( int argc, char *argv[] ) {
     
     Entity *player = _entities[0];
     player->fighter = new Fighter(player, 30, 2, 5);
+    player->inventory = new Inventory(26);
     
     // generate map and fov
     tcod_fov_map = new TCODMap(Map_Width, Map_Height);
@@ -498,7 +562,8 @@ int main( int argc, char *argv[] ) {
     tcod_fov_map->computeFov(player->x, player->y, fov_radius, fov_light_walls, fov_algorithm);
 
     // add entities to map
-    map_add_entities(Max_monsters_per_room);
+    map_add_monsters(Max_monsters_per_room);
+    map_add_items(Max_items_per_room);
 
     game_state = PLAYER_TURN;
 
@@ -510,6 +575,7 @@ int main( int argc, char *argv[] ) {
         //// INPUT
         
         Movement m = { 0, 0 };
+        bool pickup = false;
         if(key.vk == TCODK_UP) {
             m.y = -1;
         } else if(key.vk == TCODK_DOWN) {
@@ -530,6 +596,8 @@ int main( int argc, char *argv[] ) {
         } else if(key.c == 'f') {
             m.x = 1;
             m.y = 1;
+        } else if(key.c == 'g') {
+            pickup = true;
         } else if(key.vk == TCODK_ESCAPE) {
             return 0;
         } else if(key.vk == TCODK_ENTER) {
@@ -554,19 +622,35 @@ int main( int argc, char *argv[] ) {
         
         //// UPDATE
 
-        int dx = player->x + m.x, dy = player->y + m.y;
-        if(game_state == PLAYER_TURN && (m.x != 0 || m.y != 0) && !map_blocked(dx, dy)) {
-            Entity *target;
-            if(entity_at(dx, dy, &target)) {
-                player->fighter->attack(target);
-                //printf("You kick the %s in the shins, much to its annoyance!", target->name);    
-            } else {
-                player->x = dx;
-                player->y = dy;
-                tcod_fov_map->computeFov(player->x, player->y, fov_radius, fov_light_walls, fov_algorithm);
-            }
+        if(game_state == PLAYER_TURN) {
+            int dx = player->x + m.x, dy = player->y + m.y; 
+            if((m.x != 0 || m.y != 0) && !map_blocked(dx, dy)) {
+                Entity *target;
+                if(entity_blocking_at(dx, dy, &target)) {
+                    player->fighter->attack(target);
+                } else {
+                    player->x = dx;
+                    player->y = dy;
+                    tcod_fov_map->computeFov(player->x, player->y, fov_radius, fov_light_walls, fov_algorithm);
+                }
 
-            game_state = ENEMY_TURN;
+                game_state = ENEMY_TURN;
+            } else if(pickup) {
+                for(int i = 0; i < _entities.size(); i++) {
+                    auto entity = _entities[i];
+                    if(player->x == entity->x && player->y == entity->y && entity->item) {
+                        events_queue(Event::ItemPickup(entity));
+                        game_state = ENEMY_TURN;
+                        pickup = false;
+                        break;  
+                    }
+                }
+                
+                // if we still want to pickup after we checked entities there is nothing to pickup
+                if(pickup) {
+                    gui_log_message(TCOD_yellow, "There is nothing here to pick up.");
+                }
+            }
         } else if(game_state == ENEMY_TURN) {
             for(int i = 1; i < _entities.size(); i++) {
                 const auto entity = _entities[i];
@@ -606,6 +690,18 @@ int main( int argc, char *argv[] ) {
                         e.entity->ai = NULL;
                         e.entity->name = "remains of " + e.entity->name;                    
                     }
+                    break;
+                }
+                case EventType::ItemPickup: {
+                    gui_log_message(TCOD_yellow, "You picked up the %s !", e.entity->item->name.c_str());
+                    player->inventory->add_item(*e.entity->item);
+                    for(auto &ev : _entities) {
+                        if(ev == e.entity) {
+                            delete ev;
+                            ev = nullptr;
+                        }
+                    }
+                    _entities.erase(std::remove(_entities.begin(), _entities.end(), nullptr), _entities.end());
                     break;
                 }
             }
