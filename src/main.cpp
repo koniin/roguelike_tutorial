@@ -41,8 +41,10 @@ struct Colors {
 enum GameState {
     PLAYER_DEAD,
     PLAYER_TURN,
-    ENEMY_TURN
-} game_state;
+    ENEMY_TURN,
+    SHOW_INVENTORY,
+    DROP_INVENTORY
+};
 
 enum EventType {
     Message,
@@ -563,7 +565,7 @@ void gui_render_menu(TCODConsole *con, std::string header, const std::vector<std
     // SEEMS REALLY BAD TO KEEP CREATING NEW CONSOLE INSTANCES
     if(menu) {
         delete menu;
-    } 
+    }
     menu = new TCODConsole(width, height);
 
     // # print the header, with auto-wrap
@@ -579,20 +581,21 @@ void gui_render_menu(TCODConsole *con, std::string header, const std::vector<std
     }
 
     int x = int(screen_width / 2 - width / 2);
-    int y = int(screen_height / 2 - height / 2);
+    y = int(screen_height / 2 - height / 2);
     TCODConsole::blit(menu, 0, 0, width, height, con, x, y, 1.0, 0.7);
 }
 
-void gui_render_inventory() {
-inventory_menu(con, header, inventory, inventory_width, screen_width, screen_height):
-+   # show a menu with each item of the inventory as an option
-+   if len(inventory.items) == 0:
-+       options = ['Inventory is empty.']
-+   else:
-+       options = [item.name for item in inventory.items]
-+
-+   menu(con, header, options, inventory_width, screen_width, screen_height)
+void gui_render_inventory(TCODConsole *con, const std::string header, const Inventory &inventory, int inventory_width, int screen_width, int screen_height) {
+    std::vector<std::string> options;
+    if(inventory.items.size() == 0) {
+        options.push_back("Inventory is empty.");
+    } else {
+        for(auto &item : inventory.items) {
+            options.push_back(item.name);
+        }
+    } 
 
+    gui_render_menu(con, header, options, inventory_width, screen_width, screen_height);
 }
 
 int main( int argc, char *argv[] ) {
@@ -627,7 +630,8 @@ int main( int argc, char *argv[] ) {
     map_add_monsters(Max_monsters_per_room);
     map_add_items(Max_items_per_room);
 
-    game_state = PLAYER_TURN;
+    GameState game_state = PLAYER_TURN;
+    GameState previous_game_state;
 
     gui_log_message(TCOD_light_azure, "Welcome %s \nA throne is the most devious trap of them all..", player->name.c_str());
 
@@ -660,28 +664,21 @@ int main( int argc, char *argv[] ) {
             m.y = 1;
         } else if(key.c == 'g') {
             pickup = true;
-        } else if(key.vk == TCODK_ESCAPE) {
-            return 0;
+        } else if(key.c == 'i') {
+            previous_game_state = game_state;
+            game_state = SHOW_INVENTORY;
+        }  else if(key.vk == TCODK_ESCAPE) {
+            if(game_state == SHOW_INVENTORY) {
+                game_state = previous_game_state;
+            } else {
+                return 0;
+            }
         } else if(key.vk == TCODK_ENTER) {
             if(key.lalt) {
                 TCODConsole::setFullscreen(!TCODConsole::isFullscreen());
             }
         } 
 
-        // switch(key.vk) {
-        //     case TCODK_UP : m.y = -1; break;
-        //     case TCODK_DOWN : m.y = 1; break;
-        //     case TCODK_LEFT : m.x = -1; break;
-        //     case TCODK_RIGHT : m.x = 1; break;
-        //     case TCODK_ESCAPE : return 0;
-        //     case TCODK_ENTER: {
-        //         if(key.lalt) {
-        //             TCODConsole::setFullscreen(!TCODConsole::isFullscreen());
-        //         }
-        //     }
-        //     default:break;
-        // }
-        
         //// UPDATE
 
         if(game_state == PLAYER_TURN) {
@@ -818,12 +815,10 @@ int main( int argc, char *argv[] ) {
 
         TCODConsole::blit(bar, 0, 0, SCREEN_WIDTH, Panel_height, root_console, 0, Panel_y);
 
-        if(game_state == PLAYER_DEAD) {
-            root_console->setDefaultForeground(TCOD_red);
-            root_console->putChar(1, 1, 'D');
-            root_console->putChar(1, 2, 'E');
-            root_console->putChar(1, 3, 'A');
-            root_console->putChar(1, 4, 'D');
+        if(game_state == SHOW_INVENTORY) {
+            gui_render_inventory(root_console, "Press the key next to an item to use it, or Esc to cancel.\n", *player->inventory, 50, SCREEN_WIDTH, SCREEN_HEIGHT);
+        } else if(game_state == DROP_INVENTORY) {
+            gui_render_inventory(root_console, "Press the key next to an item to drop it, or Esc to cancel.\n", *player->inventory, 50, SCREEN_WIDTH, SCREEN_HEIGHT);
         }
 
         TCODConsole::flush();
