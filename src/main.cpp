@@ -544,9 +544,9 @@ enum LogStatus {
 void engine_log(const LogStatus &status, const std::string &message) {
     static const std::string delimiter = "|";
     switch(status) {
-        case Information: printf("INFO %s %s", delimiter.c_str(), message.c_str()); break;
-        case Warning: printf("WARN %s %s", delimiter.c_str(), message.c_str()); break; 
-        case Error: printf("ERRO %s %s", delimiter.c_str(), message.c_str()); break;
+        case Information: printf("INFO %s %s\n", delimiter.c_str(), message.c_str()); break;
+        case Warning: printf("WARN %s %s\n", delimiter.c_str(), message.c_str()); break; 
+        case Error: printf("ERRO %s %s\n", delimiter.c_str(), message.c_str()); break;
     }
 }
 
@@ -687,6 +687,12 @@ int main( int argc, char *argv[] ) {
                 }
             }
         } else if(game_state == SHOW_INVENTORY) {
+            int index = (int)key.c - (int)'a';
+            if(index >= 0 && previous_game_state != PLAYER_DEAD && index < player->inventory->items.size()) {
+                auto &item = player->inventory->items[index];
+                engine_log(LogStatus::Information, item.name);  
+            }
+            
             if(key.vk == TCODK_ESCAPE) {
                 game_state = previous_game_state;
             } else if(key.vk == TCODK_ENTER) {
