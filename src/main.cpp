@@ -4,6 +4,7 @@
 #include <time.h>
 #include <stdlib.h>
 #include <stdarg.h>
+#include <functional>
 
 
 // http://rogueliketutorials.com/tutorials/tcod/part-8/
@@ -11,8 +12,10 @@
 // Skipped things:
 // - A* movement for monsters (Part 6)
 
-// Known bugs:
-// - Sometimes pickups are not removed when picked up (possible pointer shit?)
+// Things to do
+// - fix event handling - what is what (message? seems like a shitty event)
+//      also logic in events? yeah why not, but whats the border between?
+// - marked_for_deletion to remove entities
 
 // http://www.roguebasin.com/index.php?title=Complete_roguelike_tutorial_using_C%2B%2B_and_libtcod_-_part_2:_map_and_actors
 // 
@@ -99,22 +102,53 @@ struct Entity {
     Item *item = NULL;
 };
 
+struct ItemArgs {
+    int amount = 0;
+};
+
 struct Item {
+    int id;
     std::string name;
+    std::function<bool(Entity* entity, const ItemArgs &args)> on_use = NULL;
+    ItemArgs args;
 };
 
 struct Inventory {
-    int capacity;
+    Entity *_owner;
     std::vector<Item> items;
-    Inventory(int capacity) : capacity(capacity) {}
+    int capacity;
+    Inventory(Entity *owner, int capacity) : _owner(owner), capacity(capacity) {}
+
+    int _dirty_shit = 0;
 
     bool add_item(Item i) {
         if(items.size() >= capacity) {
             return false;
         } 
-        
+        i.id = _dirty_shit++;
         items.push_back(i);
         return true;
+    }
+
+    void use(size_t index) {
+        use(items[index]);
+    }
+
+    void use(Item &item) {
+        if(!item.on_use) {
+            std::string msg = "The " + item.name + " cannot be used.";
+            events_queue({ EventType::Message, NULL, msg, TCOD_yellow});
+            return;
+        } 
+
+        bool consumed = item.on_use(_owner, item.args);
+        remove(item);
+    }
+
+    void remove(const Item &item) {
+        items.erase(std::remove_if(items.begin(), items.end(), [&](Item const & i) {
+            return item.id == i.id;
+        }), items.end());
     }
 };
 
@@ -153,6 +187,13 @@ struct Fighter {
             events_queue({ EventType::Message, NULL, buffer, TCOD_light_grey });
         }
     }
+
+    void heal(int amount) {
+        hp += amount;
+        if(hp > hp_max) {
+            hp = hp_max;
+        }
+    }
 };
 
 struct Ai {
@@ -188,6 +229,16 @@ struct BasicMonster : Ai {
         _owner = owner;
     }
 };
+
+bool item_heal_entity(Entity *entity, const ItemArgs &args) {
+    if(entity->fighter->hp == entity->fighter->hp_max) {
+        events_queue({ EventType::Message, NULL, "You are already at full health", TCOD_yellow });
+        return false;
+    } 
+    entity->fighter->heal(args.amount);
+    events_queue({ EventType::Message, NULL, "Your wounds start to feel better!", TCOD_green });
+    return true;
+}
 
 struct Tile {
     bool blocked = true;
@@ -393,6 +444,8 @@ void map_add_items(int max_items_per_room) {
             e = new Entity(x, y, '!', TCOD_violet, "Health potion", false, render_priority.ITEM );
             e->item = new Item();
             e->item->name = "Health potion";
+            e->item->args = { 4 };
+            e->item->on_use = item_heal_entity;
             _entities.push_back(e);            
         }
     }
@@ -607,7 +660,7 @@ int main( int argc, char *argv[] ) {
     
     Entity *player = _entities[0];
     player->fighter = new Fighter(player, 30, 2, 5);
-    player->inventory = new Inventory(26);
+    player->inventory = new Inventory(player, 26);
     
     // generate map and fov
     tcod_fov_map = new TCODMap(Map_Width, Map_Height);
@@ -682,8 +735,8 @@ int main( int argc, char *argv[] ) {
         } else if(game_state == SHOW_INVENTORY) {
             int index = (int)key.c - (int)'a';
             if(index >= 0 && previous_game_state != PLAYER_DEAD && index < player->inventory->items.size()) {
-                auto &item = player->inventory->items[index];
-                engine_log(LogStatus::Information, item.name);  
+                //auto &item = player->inventory->items[index];
+                player->inventory->use(index);
             }
             
             if(key.vk == TCODK_ESCAPE) {
