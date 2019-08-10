@@ -57,14 +57,10 @@ struct Event {
     Entity *entity = NULL;
     std::string message;
     TCOD_color_t color;
-
-    static Event ItemPickup(Entity *entity) {
-        return { EventType::ItemPickup, entity };
-    }
 };
 
 std::vector<Event> _event_queue; 
-void events_queue(const Event e) {
+void events_queue(Event e) {
     _event_queue.push_back(e);
 }
 
@@ -112,16 +108,13 @@ struct Inventory {
     std::vector<Item> items;
     Inventory(int capacity) : capacity(capacity) {}
 
-    void add_item(const Item &i) {
+    bool add_item(Item i) {
         if(items.size() >= capacity) {
-            events_queue({ EventType::Message, NULL, "You cannot carry anymore, inventory full", TCOD_yellow });
-        } else {
-            // VERY SHITTY STRING ALLOCATION
-            char buffer[128];
-            sprintf(buffer, "You pick up the %s", i.name.c_str());
-            events_queue({ EventType::Message, NULL, buffer, TCOD_blue });
-            items.push_back(i);
-        }
+            return false;
+        } 
+        
+        items.push_back(i);
+        return true;
     }
 };
 
@@ -722,16 +715,15 @@ int main( int argc, char *argv[] ) {
                 for(int i = 0; i < _entities.size(); i++) {
                     auto entity = _entities[i];
                     if(player->x == entity->x && player->y == entity->y && entity->item) {
-                        events_queue(Event::ItemPickup(entity));
+                        events_queue({ EventType::ItemPickup, entity });
                         game_state = ENEMY_TURN;
                         pickup = false;
                         break;  
                     }
                 }
-                
                 // if we still want to pickup after we checked entities there is nothing to pickup
                 if(pickup) {
-                    gui_log_message(TCOD_yellow, "There is nothing here to pick up.");
+                    events_queue({ EventType::Message, NULL, "There is nothing here to pick up.", TCOD_yellow });                    
                 }
             }
         } else if(game_state == ENEMY_TURN) {
@@ -776,8 +768,12 @@ int main( int argc, char *argv[] ) {
                     break;
                 }
                 case EventType::ItemPickup: {
-                    gui_log_message(TCOD_yellow, "You picked up the %s !", e.entity->item->name.c_str());
-                    player->inventory->add_item(*e.entity->item);
+                    auto success = player->inventory->add_item(*e.entity->item);
+                    if(success) {
+                        gui_log_message(TCOD_yellow, "You picked up the %s !", e.entity->item->name.c_str());
+                    } else {
+                        gui_log_message(TCOD_yellow, "You cannot carry anymore, inventory full");
+                    }
                     int delete_count = 0;
                     for(auto &ev : _entities) {
                         if(ev == e.entity) {
