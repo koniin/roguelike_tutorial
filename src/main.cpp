@@ -11,8 +11,8 @@
 // Skipped things:
 // - A* movement for monsters (Part 6)
 
-// 
-// http://rogueliketutorials.com/tutorials/tcod/part-6/
+// Known bugs:
+// - Sometimes pickups are not removed when picked up (possible pointer shit?)
 
 // http://www.roguebasin.com/index.php?title=Complete_roguelike_tutorial_using_C%2B%2B_and_libtcod_-_part_2:_map_and_actors
 // 
@@ -642,42 +642,60 @@ int main( int argc, char *argv[] ) {
         
         Movement m = { 0, 0 };
         bool pickup = false;
-        if(key.vk == TCODK_UP) {
-            m.y = -1;
-        } else if(key.vk == TCODK_DOWN) {
-            m.y = 1;
-        } else if(key.vk == TCODK_LEFT) {
-            m.x = -1;
-        } else if(key.vk == TCODK_RIGHT) {
-            m.x = 1;
-        } else if(key.c == 'r') {
-            m.x = 1;
-            m.y = -1;
-        } else if(key.c == 'e') {
-            m.x = -1;
-            m.y = -1;
-        } else if(key.c == 'd') {
-            m.x = -1;
-            m.y = 1;
-        } else if(key.c == 'f') {
-            m.x = 1;
-            m.y = 1;
-        } else if(key.c == 'g') {
-            pickup = true;
-        } else if(key.c == 'i') {
-            previous_game_state = game_state;
-            game_state = SHOW_INVENTORY;
-        }  else if(key.vk == TCODK_ESCAPE) {
-            if(game_state == SHOW_INVENTORY) {
-                game_state = previous_game_state;
-            } else {
+        if(game_state == PLAYER_TURN) {    
+            if(key.vk == TCODK_UP) {
+                m.y = -1;
+            } else if(key.vk == TCODK_DOWN) {
+                m.y = 1;
+            } else if(key.vk == TCODK_LEFT) {
+                m.x = -1;
+            } else if(key.vk == TCODK_RIGHT) {
+                m.x = 1;
+            } else if(key.c == 'r') {
+                m.x = 1;
+                m.y = -1;
+            } else if(key.c == 'e') {
+                m.x = -1;
+                m.y = -1;
+            } else if(key.c == 'd') {
+                m.x = -1;
+                m.y = 1;
+            } else if(key.c == 'f') {
+                m.x = 1;
+                m.y = 1;
+            } else if(key.c == 'g') {
+                pickup = true;
+            } else if(key.c == 'i') {
+                previous_game_state = game_state;
+                game_state = SHOW_INVENTORY;
+            } else if(key.vk == TCODK_ESCAPE) {
                 return 0;
+            } else if(key.vk == TCODK_ENTER) {
+                if(key.lalt) {
+                    TCODConsole::setFullscreen(!TCODConsole::isFullscreen());
+                }
             }
-        } else if(key.vk == TCODK_ENTER) {
-            if(key.lalt) {
-                TCODConsole::setFullscreen(!TCODConsole::isFullscreen());
+        } else if(game_state == PLAYER_DEAD) {
+            if(key.c == 'i') {
+                previous_game_state = game_state;
+                game_state = SHOW_INVENTORY;
+            } else if(key.vk == TCODK_ESCAPE) {
+                return 0;
+            } else if(key.vk == TCODK_ENTER) {
+                if(key.lalt) {
+                    TCODConsole::setFullscreen(!TCODConsole::isFullscreen());
+                }
             }
-        } 
+        } else if(game_state == SHOW_INVENTORY) {
+            if(key.vk == TCODK_ESCAPE) {
+                game_state = previous_game_state;
+            } else if(key.vk == TCODK_ENTER) {
+                if(key.lalt) {
+                    TCODConsole::setFullscreen(!TCODConsole::isFullscreen());
+                }
+            }
+        }
+         
 
         //// UPDATE
 
@@ -754,11 +772,18 @@ int main( int argc, char *argv[] ) {
                 case EventType::ItemPickup: {
                     gui_log_message(TCOD_yellow, "You picked up the %s !", e.entity->item->name.c_str());
                     player->inventory->add_item(*e.entity->item);
+                    int delete_count = 0;
                     for(auto &ev : _entities) {
                         if(ev == e.entity) {
                             delete ev;
                             ev = nullptr;
+                            delete_count++;
+                            break;
                         }
+                    }
+                    if(delete_count == 0) {
+                        engine_log(LogStatus::Error, "NO ITEM REMOVED WHEN PICKED UP!");
+
                     }
                     _entities.erase(std::remove(_entities.begin(), _entities.end(), nullptr), _entities.end());
                     break;
