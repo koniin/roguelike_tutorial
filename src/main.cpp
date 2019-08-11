@@ -109,6 +109,7 @@ struct Entity {
     std::string name;
     bool blocks = false;
     int render_order = 0;
+    bool marked_for_deletion = false;
 
     Entity(int x_, int y_, int gfx_, TCODColor color_, std::string name_, bool blocks_, int render_order_) : 
         x(x_), y(y_), gfx(gfx_), color(color_), name(name_), blocks(blocks_), render_order(render_order_) {
@@ -206,6 +207,7 @@ struct Fighter {
 
         if(hp <= 0) {
             events_queue({ EventType::EntityDead, _owner });
+            _owner->marked_for_deletion = true;
         }
     }
 
@@ -283,7 +285,7 @@ bool item_lightning_bolt(Entity *caster, const ItemArgs &args, Context &context)
     Entity *closest = NULL;
     float closest_distance = 1000000.f;
     for(auto &e : context.entities) {
-        if(caster->fighter && e != caster && context.fov_map->isInFov(e->x, e->y)) {
+        if(e->fighter && e != caster && context.fov_map->isInFov(e->x, e->y)) {
             float distance = distance_to(caster->x, caster->y, e->x, e->y);
             if(distance < closest_distance) {
                 closest = e;
@@ -855,7 +857,7 @@ int main( int argc, char *argv[] ) {
         } else if(game_state == ENEMY_TURN) {
             for(int i = 1; i < _entities.size(); i++) {
                 const auto entity = _entities[i];
-                if(entity->ai) {
+                if(!entity->marked_for_deletion && entity->ai) {
                     entity->ai->take_turn(player);
                 }
             }
