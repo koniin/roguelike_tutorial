@@ -7,7 +7,8 @@
 #include <functional>
 
 
-// http://rogueliketutorials.com/tutorials/tcod/part-8/
+// http://rogueliketutorials.com/tutorials/tcod/part-10/
+// http://www.roguebasin.com/index.php?title=Complete_roguelike_tutorial_using_C%2B%2B_and_libtcod_-_part_10.1:_persistence
 
 // Skipped things:
 // - A* movement for monsters (Part 6)
