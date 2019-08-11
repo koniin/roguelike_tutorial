@@ -300,7 +300,33 @@ struct BasicMonster : Ai {
     }
 };
 
-bool item_heal_entity(Entity *entity, const ItemArgs &args, Context &context) {
+struct ConfusedMonster : Ai {
+    Entity *_owner;
+    Ai *previous;
+    int turns_remaining;
+    void take_turn(Entity *target) override {
+        if(turns_remaining > 0) {
+            turns_remaining--;
+
+            int rx = _owner->x + rand_int(0, 2) - 1;
+            int ry = _owner->y + rand_int(0, 2) - 1;
+
+            if(rx != _owner->x && ry != _owner->y) {
+                move_towards(_owner, rx, ry);
+            }
+        } else {
+            std::string msg = "The " + _owner->name + " is no longer confused!";
+            events_queue({ EventType::Message, NULL, msg, TCOD_red });
+
+            _owner->ai = previous;
+        }
+    }
+
+    ConfusedMonster(Entity *owner, Ai *previous, int turns) 
+        : _owner(owner), previous(previous), turns_remaining(turns) {}
+};
+
+bool cast_heal_entity(Entity *entity, const ItemArgs &args, Context &context) {
     if(entity->fighter->hp == entity->fighter->hp_max) {
         events_queue({ EventType::Message, NULL, "You are already at full health", TCOD_yellow });
         return false;
@@ -310,7 +336,7 @@ bool item_heal_entity(Entity *entity, const ItemArgs &args, Context &context) {
     return true;
 }
 
-bool item_lightning_bolt(Entity *caster, const ItemArgs &args, Context &context) {
+bool cast_lightning_bolt(Entity *caster, const ItemArgs &args, Context &context) {
     Entity *closest = NULL;
     float closest_distance = 1000000.f;
     for(auto &e : context.entities) {
@@ -334,7 +360,7 @@ bool item_lightning_bolt(Entity *caster, const ItemArgs &args, Context &context)
     }
 }
 
-bool item_fireball(Entity *caster, const ItemArgs &args, Context &context) {
+bool cast_fireball(Entity *caster, const ItemArgs &args, Context &context) {
     if(!context.fov_map->isInFov(args.target_x, args.target_y)) {
         events_queue({ EventType::Message, NULL, "You cannot target a tile outside your field of view.", TCOD_yellow });
         return false;
@@ -352,6 +378,26 @@ bool item_fireball(Entity *caster, const ItemArgs &args, Context &context) {
     }
 
     return true;
+}
+
+bool cast_confuse(Entity *caster, const ItemArgs &args, Context &context) {
+    if(!context.fov_map->isInFov(args.target_x, args.target_y)) {
+        events_queue({ EventType::Message, NULL, "You cannot target a tile outside your field of view.", TCOD_yellow });
+        return false;
+    }
+
+    for(auto &e : context.entities) {
+        if(e->ai && e->x == args.target_x &&  e->y == args.target_y) {
+            std::string msg = "The eyes of the " + e->name + " looks vacant as it starts to stumble around!";
+            events_queue({ EventType::Message, NULL, msg, TCOD_light_green });
+            e->ai = new ConfusedMonster(e, e->ai, 10);
+            return true;
+        }
+    }
+
+    std::string msg = "There is no targetable entity at that location.";
+    events_queue({ EventType::Message, NULL, msg, TCOD_yellow });
+    return false;
 }
 
 struct Tile {
@@ -555,24 +601,34 @@ void map_add_items(int max_items_per_room) {
             // We probably want some other way of generating the item etc
             // so this will change in the future anyway
             int chance = rand_int(0, 100);
-            if(chance > 700) {
+            chance = 85;
+            if(chance < 70) {
             
                 Entity *e;
                 e = new Entity(x, y, '!', TCOD_violet, "Health potion", false, render_priority.ITEM );
                 e->item = new Item();
                 e->item->name = "Health potion";
                 e->item->args = { 4 };
-                e->item->on_use = item_heal_entity;
+                e->item->on_use = cast_heal_entity;
                 _entities.push_back(e);
-            } else if(chance < 85) {
+            } else if(chance < 80) {
                 Entity *e;
                 e = new Entity(x, y, '#', TCOD_red, "Fireball scroll", false, render_priority.ITEM );
                 e->item = new Item();
                 e->item->name = "Fireball scroll";
                 e->item->args = { 12, 3 };
-                e->item->on_use = item_fireball;
+                e->item->on_use = cast_fireball;
                 e->item->targeting = Targeting::Position;
                 e->item->targeting_message = "Left-click a target tile for the fireball, or right click to cancel.";
+                _entities.push_back(e);
+            } else if(chance < 90) {
+                Entity *e;
+                e = new Entity(x, y, '#', TCOD_light_pink, "Confusion scroll", false, render_priority.ITEM );
+                e->item = new Item();
+                e->item->name = "Confusion scroll";
+                e->item->on_use = cast_confuse;
+                e->item->targeting = Targeting::Position;
+                e->item->targeting_message = "Left-click an enemy to confuse it, or right click to cancel.";
                 _entities.push_back(e);
             } else {
                 Entity *e;
@@ -580,7 +636,7 @@ void map_add_items(int max_items_per_room) {
                 e->item = new Item();
                 e->item->name = "Lightning scroll";
                 e->item->args = { 20, 5 };
-                e->item->on_use = item_lightning_bolt;
+                e->item->on_use = cast_lightning_bolt;
                 _entities.push_back(e);
             }            
         }
