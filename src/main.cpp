@@ -65,7 +65,8 @@ enum GameState {
     PLAYER_DEAD,
     PLAYER_TURN,
     ENEMY_TURN,
-    SHOW_INVENTORY
+    SHOW_INVENTORY,
+    TARGETING
 };
 
 enum EventType {
@@ -125,6 +126,9 @@ struct Entity {
 struct ItemArgs {
     int amount = 0;
     float range = 0.0f;
+    Entity *target = NULL;
+    int target_x = 0;
+    int target_y = 0;
 };
 
 struct Context {
@@ -135,11 +139,18 @@ struct Context {
         entities(entities), fov_map(fov_map) {}
 };
 
+enum Targeting {
+    None,
+    Position
+};
+
 struct Item {
     int id;
     std::string name;
     std::function<bool(Entity* entity, const ItemArgs &args, Context &context)> on_use = NULL;
     ItemArgs args;
+    Targeting targeting = Targeting::None;
+    std::string targeting_message = "";
 };
 
 struct Inventory {
@@ -169,10 +180,28 @@ struct Inventory {
             return false;
         } 
 
+        if(requires_target(item)) {
+            return false;
+        }
+
         bool consumed = item->item->on_use(_owner, item->item->args, context);
         remove(item);
         delete item; // Shitty memory handling
         return true;
+    }
+    
+    bool requires_target(size_t index) {
+        return requires_target(items[index]);
+    }
+
+    bool requires_target(Entity *item) {    
+        if(item->item->targeting == Targeting::None) {
+            return false;
+        }
+        if(item->item->targeting != Targeting::None && !(item->item->args.target_x || item->item->args.target_y)) {
+            return true;
+        }
+        return false;
     }
 
     void remove(Entity *item) {
@@ -303,6 +332,26 @@ bool item_lightning_bolt(Entity *caster, const ItemArgs &args, Context &context)
         events_queue({ EventType::Message, NULL, "No enemy is close enough to strike.", TCOD_red });
         return false;
     }
+}
+
+bool item_fireball(Entity *caster, const ItemArgs &args, Context &context) {
+    if(!context.fov_map->isInFov(args.target_x, args.target_y)) {
+        events_queue({ EventType::Message, NULL, "You cannot target a tile outside your field of view.", TCOD_yellow });
+        return false;
+    }
+
+    std::string msg = "The fireball explodes, burning everything within " + std::to_string(args.range) + " tiles!";
+    events_queue({ EventType::Message, NULL, msg, TCOD_orange });
+
+    for(auto &e : context.entities) {
+        if(e->fighter && distance_to(e->x, e->y, args.target_x, args.target_y) <= args.range) {
+            msg = "The " + e->name + " gets burned for " + std::to_string(args.amount) + " hit points.";
+            events_queue({ EventType::Message, NULL, msg, TCOD_orange });
+            e->fighter->take_damage(args.amount);
+        }
+    }
+
+    return true;
 }
 
 struct Tile {
@@ -514,6 +563,16 @@ void map_add_items(int max_items_per_room) {
                 e->item->name = "Health potion";
                 e->item->args = { 4 };
                 e->item->on_use = item_heal_entity;
+                _entities.push_back(e);
+            } else if(chance < 85) {
+                Entity *e;
+                e = new Entity(x, y, '#', TCOD_red, "Fireball scroll", false, render_priority.ITEM );
+                e->item = new Item();
+                e->item->name = "Fireball scroll";
+                e->item->args = { 12, 3 };
+                e->item->on_use = item_fireball;
+                e->item->targeting = Targeting::Position;
+                e->item->targeting_message = "Left-click a target tile for the fireball, or right click to cancel.";
                 _entities.push_back(e);
             } else {
                 Entity *e;
@@ -744,7 +803,7 @@ int main( int argc, char *argv[] ) {
     gui_log_message(TCOD_light_azure, "Welcome %s \nA throne is the most devious trap of them all..", player->name.c_str());
 
     Context context = Context(_entities, tcod_fov_map);
-
+    Entity *targeting_item = NULL;
     while ( !TCODConsole::isWindowClosed() ) {
         TCODSystem::checkForEvent(TCOD_EVENT_KEY_PRESS | TCOD_EVENT_MOUSE, &key, &mouse);
 
@@ -800,17 +859,27 @@ int main( int argc, char *argv[] ) {
             int index = (int)key.c - (int)'a';
             if(index >= 0 && previous_game_state != PLAYER_DEAD && index < player->inventory->items.size()) {
                 if(key.lalt) {
+                    // DROP ITEM
                     auto item_entity = player->inventory->items[index];
                     item_entity->x = player->x;
                     item_entity->y = player->y;
                     _entities.push_back(item_entity);
                     player->inventory->remove(item_entity);
+                    game_state = ENEMY_TURN;
                 } else {
-                    bool consumed = player->inventory->use(index, context);
+                    if(player->inventory->requires_target(index)) {
+                        targeting_item = player->inventory->items[index];
+                        previous_game_state = PLAYER_TURN;
+                        game_state = TARGETING;
+                        events_queue({ EventType::Message, NULL, targeting_item->item->targeting_message, TCOD_yellow });   
+                    } else {
+                        bool consumed = player->inventory->use(index, context);
+                        game_state = ENEMY_TURN;
+                    }
                 }
                 //if(consumed) {
                 // trying to use an item always consumes the turn
-                game_state = ENEMY_TURN;
+                
                 //}
             }
             
@@ -821,8 +890,20 @@ int main( int argc, char *argv[] ) {
                     TCODConsole::setFullscreen(!TCODConsole::isFullscreen());
                 }
             }
+        } else if(game_state == TARGETING) {
+            int x = mouse.cx, y = mouse.cy;            
+            if(mouse.lbutton_pressed) {
+                //targeting_item->item->args.target_x
+                targeting_item->item->args.target_x = x;
+                targeting_item->item->args.target_y = y;
+                if(player->inventory->use(targeting_item, context)) {
+                    game_state = ENEMY_TURN;
+                }
+            } else if(key.vk == TCODK_ESCAPE || mouse.rbutton_pressed) {
+                game_state = previous_game_state;
+                events_queue({ EventType::Message, NULL, "Targeting cancelled", TCOD_yellow });   
+            }
         }
-         
 
         //// UPDATE
 
