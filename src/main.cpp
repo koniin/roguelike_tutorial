@@ -123,12 +123,21 @@ struct Entity {
 
 struct ItemArgs {
     int amount = 0;
+    float range = 0.0f;
+};
+
+struct Context {
+    std::vector<Entity *> &entities;
+    TCODMap *fov_map;
+
+    Context(std::vector<Entity *> &entities, TCODMap *fov_map) :
+        entities(entities), fov_map(fov_map) {}
 };
 
 struct Item {
     int id;
     std::string name;
-    std::function<bool(Entity* entity, const ItemArgs &args)> on_use = NULL;
+    std::function<bool(Entity* entity, const ItemArgs &args, Context &context)> on_use = NULL;
     ItemArgs args;
 };
 
@@ -148,18 +157,18 @@ struct Inventory {
         return true;
     }
 
-    bool use(size_t index) {
-        return use(items[index]);
+    bool use(size_t index, Context &context) {
+        return use(items[index], context);
     }
 
-    bool use(Entity *item) {
+    bool use(Entity *item, Context &context) {
         if(!item->item->on_use) {
             std::string msg = "The " + item->item->name + " cannot be used.";
             events_queue({ EventType::Message, NULL, msg, TCOD_yellow});
             return false;
         } 
 
-        bool consumed = item->item->on_use(_owner, item->item->args);
+        bool consumed = item->item->on_use(_owner, item->item->args, context);
         remove(item);
         delete item; // Shitty memory handling
         return true;
@@ -242,7 +251,7 @@ struct BasicMonster : Ai {
     Entity *_owner;
     void take_turn(Entity *target) override {
         if(tcod_fov_map->isInFov(_owner->x, _owner->y)) {
-            if(distance_to(_owner->x, _owner->y, target->x, target->y) >= 2) {
+            if(distance_to(_owner->x, _owner->y, target->x, target->y) >= 2.0f) {
 
                 // CAN REPLACE HITS WITH ASTAR MOVEMENT
 
@@ -260,7 +269,7 @@ struct BasicMonster : Ai {
     }
 };
 
-bool item_heal_entity(Entity *entity, const ItemArgs &args) {
+bool item_heal_entity(Entity *entity, const ItemArgs &args, Context &context) {
     if(entity->fighter->hp == entity->fighter->hp_max) {
         events_queue({ EventType::Message, NULL, "You are already at full health", TCOD_yellow });
         return false;
@@ -268,6 +277,30 @@ bool item_heal_entity(Entity *entity, const ItemArgs &args) {
     entity->fighter->heal(args.amount);
     events_queue({ EventType::Message, NULL, "Your wounds start to feel better!", TCOD_green });
     return true;
+}
+
+bool item_lightning_bolt(Entity *caster, const ItemArgs &args, Context &context) {
+    Entity *closest = NULL;
+    float closest_distance = 1000000.f;
+    for(auto &e : context.entities) {
+        if(caster->fighter && e != caster && context.fov_map->isInFov(e->x, e->y)) {
+            float distance = distance_to(caster->x, caster->y, e->x, e->y);
+            if(distance < closest_distance) {
+                closest = e;
+                closest_distance = distance;
+            }
+        }
+    }
+
+    if(closest) {
+        closest->fighter->take_damage(args.amount);
+        std::string msg = "A lighting bolt strikes the " + closest->name + " with a loud thunder! \nThe damage is " + std::to_string(args.amount);
+        events_queue({ EventType::Message, NULL, msg, TCOD_amber });
+        return true;
+    } else {
+        events_queue({ EventType::Message, NULL, "No enemy is close enough to strike.", TCOD_red });
+        return false;
+    }
 }
 
 struct Tile {
@@ -470,13 +503,25 @@ void map_add_items(int max_items_per_room) {
 
             // We probably want some other way of generating the item etc
             // so this will change in the future anyway
-            Entity *e;
-            e = new Entity(x, y, '!', TCOD_violet, "Health potion", false, render_priority.ITEM );
-            e->item = new Item();
-            e->item->name = "Health potion";
-            e->item->args = { 4 };
-            e->item->on_use = item_heal_entity;
-            _entities.push_back(e);            
+            int chance = rand_int(0, 100);
+            if(chance > 700) {
+            
+                Entity *e;
+                e = new Entity(x, y, '!', TCOD_violet, "Health potion", false, render_priority.ITEM );
+                e->item = new Item();
+                e->item->name = "Health potion";
+                e->item->args = { 4 };
+                e->item->on_use = item_heal_entity;
+                _entities.push_back(e);
+            } else {
+                Entity *e;
+                e = new Entity(x, y, '#', TCOD_violet, "Lightning scroll", false, render_priority.ITEM );
+                e->item = new Item();
+                e->item->name = "Lightning scroll";
+                e->item->args = { 20, 5 };
+                e->item->on_use = item_lightning_bolt;
+                _entities.push_back(e);
+            }            
         }
     }
 }
@@ -696,6 +741,8 @@ int main( int argc, char *argv[] ) {
 
     gui_log_message(TCOD_light_azure, "Welcome %s \nA throne is the most devious trap of them all..", player->name.c_str());
 
+    Context context = Context(_entities, tcod_fov_map);
+
     while ( !TCODConsole::isWindowClosed() ) {
         TCODSystem::checkForEvent(TCOD_EVENT_KEY_PRESS | TCOD_EVENT_MOUSE, &key, &mouse);
 
@@ -757,7 +804,7 @@ int main( int argc, char *argv[] ) {
                     _entities.push_back(item_entity);
                     player->inventory->remove(item_entity);
                 } else {
-                    bool consumed = player->inventory->use(index);
+                    bool consumed = player->inventory->use(index, context);
                 }
                 //if(consumed) {
                 // trying to use an item always consumes the turn
