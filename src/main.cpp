@@ -31,6 +31,21 @@ int rand_int(int min, int max) {
     return (rand() % (upper - lower + 1)) + lower; 
 }
 
+enum LogStatus {
+    Information,
+    Warning,
+    Error
+};
+
+void engine_log(const LogStatus &status, const std::string &message) {
+    static const std::string delimiter = "|";
+    switch(status) {
+        case Information: printf("INFO %s %s\n", delimiter.c_str(), message.c_str()); break;
+        case Warning: printf("WARN %s %s\n", delimiter.c_str(), message.c_str()); break; 
+        case Error: printf("ERRO %s %s\n", delimiter.c_str(), message.c_str()); break;
+    }
+}
+
 const int SCREEN_WIDTH = 80;
 const int SCREEN_HEIGHT = 50;
 
@@ -115,40 +130,51 @@ struct Item {
 
 struct Inventory {
     Entity *_owner;
-    std::vector<Item> items;
+    std::vector<Entity*> items;
     int capacity;
     Inventory(Entity *owner, int capacity) : _owner(owner), capacity(capacity) {}
 
     int _dirty_shit = 0;
 
-    bool add_item(Item i) {
+    bool add_item(Entity *item) {
         if(items.size() >= capacity) {
             return false;
         } 
-        i.id = _dirty_shit++;
-        items.push_back(i);
+        items.push_back(item);
         return true;
     }
 
-    void use(size_t index) {
-        use(items[index]);
+    bool use(size_t index) {
+        return use(items[index]);
     }
 
-    void use(Item &item) {
-        if(!item.on_use) {
-            std::string msg = "The " + item.name + " cannot be used.";
+    bool use(Entity *item) {
+        if(!item->item->on_use) {
+            std::string msg = "The " + item->item->name + " cannot be used.";
             events_queue({ EventType::Message, NULL, msg, TCOD_yellow});
-            return;
+            return false;
         } 
 
-        bool consumed = item.on_use(_owner, item.args);
+        bool consumed = item->item->on_use(_owner, item->item->args);
         remove(item);
+        delete item; // Shitty memory handling
+        return true;
     }
 
-    void remove(const Item &item) {
-        items.erase(std::remove_if(items.begin(), items.end(), [&](Item const & i) {
-            return item.id == i.id;
-        }), items.end());
+    void remove(Entity *item) {
+        int delete_count = 0;
+        int index = 0;
+        for(auto &i : items) {
+            if(i == item) { 
+                delete_count++;
+                break;
+            }
+            index++;
+        }
+        if(delete_count == 0) {
+            engine_log(LogStatus::Error, "NO ITEM REMOVED WHEN PICKED UP! (Inventory::remove)");
+        }
+        items.erase(items.begin() + index);
     }
 };
 
@@ -581,21 +607,6 @@ void gui_render_mouse_look(TCODConsole *con, int mouse_x, int mouse_y) {
     con->print(1, 0, name_list.c_str());
 }
 
-enum LogStatus {
-    Information,
-    Warning,
-    Error
-};
-
-void engine_log(const LogStatus &status, const std::string &message) {
-    static const std::string delimiter = "|";
-    switch(status) {
-        case Information: printf("INFO %s %s\n", delimiter.c_str(), message.c_str()); break;
-        case Warning: printf("WARN %s %s\n", delimiter.c_str(), message.c_str()); break; 
-        case Error: printf("ERRO %s %s\n", delimiter.c_str(), message.c_str()); break;
-    }
-}
-
 TCODConsole *menu;
 void gui_render_menu(TCODConsole *con, std::string header, const std::vector<std::string> &options, 
     int width, int screen_width, int screen_height) {
@@ -637,7 +648,7 @@ void gui_render_inventory(TCODConsole *con, const std::string header, const Inve
         options.push_back("Inventory is empty.");
     } else {
         for(auto &item : inventory.items) {
-            options.push_back(item.name);
+            options.push_back(item->item->name);
         }
     } 
 
@@ -735,8 +746,19 @@ int main( int argc, char *argv[] ) {
         } else if(game_state == SHOW_INVENTORY) {
             int index = (int)key.c - (int)'a';
             if(index >= 0 && previous_game_state != PLAYER_DEAD && index < player->inventory->items.size()) {
-                //auto &item = player->inventory->items[index];
-                player->inventory->use(index);
+                if(key.lalt) {
+                    auto item_entity = player->inventory->items[index];
+                    item_entity->x = player->x;
+                    item_entity->y = player->y;
+                    _entities.push_back(item_entity);
+                    player->inventory->remove(item_entity);
+                } else {
+                    bool consumed = player->inventory->use(index);
+                }
+                //if(consumed) {
+                // trying to use an item always consumes the turn
+                game_state = ENEMY_TURN;
+                //}
             }
             
             if(key.vk == TCODK_ESCAPE) {
@@ -821,26 +843,26 @@ int main( int argc, char *argv[] ) {
                     break;
                 }
                 case EventType::ItemPickup: {
-                    auto success = player->inventory->add_item(*e.entity->item);
+                    auto success = player->inventory->add_item(e.entity);
                     if(success) {
                         gui_log_message(TCOD_yellow, "You picked up the %s !", e.entity->item->name.c_str());
                     } else {
                         gui_log_message(TCOD_yellow, "You cannot carry anymore, inventory full");
                     }
+                    
                     int delete_count = 0;
+                    int index = 0;
                     for(auto &ev : _entities) {
                         if(ev == e.entity) {
-                            delete ev;
-                            ev = nullptr;
                             delete_count++;
                             break;
                         }
+                        index++;
                     }
                     if(delete_count == 0) {
                         engine_log(LogStatus::Error, "NO ITEM REMOVED WHEN PICKED UP!");
-
                     }
-                    _entities.erase(std::remove(_entities.begin(), _entities.end(), nullptr), _entities.end());
+                    _entities.erase(_entities.begin() + index);
                     break;
                 }
             }
