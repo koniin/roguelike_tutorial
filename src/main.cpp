@@ -11,11 +11,16 @@
 
 // Skipped things:
 // - A* movement for monsters (Part 6)
+// - Separate drop item inventory listing (Part 8)
 
 // Things to do
 // - fix event handling - what is what (message? seems like a shitty event)
 //      also logic in events? yeah why not, but whats the border between?
 // - marked_for_deletion to remove entities
+// - Memory handling is atrociuos (pointers and memory everywhere)
+// - most things are specific to player (don't know if enemies can have inventory)
+//    => all event handling is specific to player now
+//    => also ties into event handling fix (what is and what is not an event?)
 
 // http://www.roguebasin.com/index.php?title=Complete_roguelike_tutorial_using_C%2B%2B_and_libtcod_-_part_2:_map_and_actors
 // 
@@ -60,8 +65,7 @@ enum GameState {
     PLAYER_DEAD,
     PLAYER_TURN,
     ENEMY_TURN,
-    SHOW_INVENTORY,
-    DROP_INVENTORY
+    SHOW_INVENTORY
 };
 
 enum EventType {
@@ -918,9 +922,7 @@ int main( int argc, char *argv[] ) {
         TCODConsole::blit(bar, 0, 0, SCREEN_WIDTH, Panel_height, root_console, 0, Panel_y);
 
         if(game_state == SHOW_INVENTORY) {
-            gui_render_inventory(root_console, "Press the key next to an item to use it, or Esc to cancel.\n", *player->inventory, 50, SCREEN_WIDTH, SCREEN_HEIGHT);
-        } else if(game_state == DROP_INVENTORY) {
-            gui_render_inventory(root_console, "Press the key next to an item to drop it, or Esc to cancel.\n", *player->inventory, 50, SCREEN_WIDTH, SCREEN_HEIGHT);
+            gui_render_inventory(root_console, "Press the key next to an item to use it (hold alt to drop), or Esc to cancel.\n", *player->inventory, 50, SCREEN_WIDTH, SCREEN_HEIGHT);
         }
 
         TCODConsole::flush();
