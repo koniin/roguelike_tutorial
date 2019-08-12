@@ -822,24 +822,17 @@ void gui_render_inventory(TCODConsole *con, const std::string header, const Inve
     gui_render_menu(con, header, options, inventory_width, screen_width, screen_height);
 }
 
-int main( int argc, char *argv[] ) {
-    srand((unsigned int)time(NULL));
+Entity *player;
+GameState game_state = PLAYER_TURN;
+GameState previous_game_state;
 
-    TCODConsole::setCustomFont("data/arial10x10.png", TCOD_FONT_TYPE_GREYSCALE | TCOD_FONT_LAYOUT_TCOD);
-    TCODConsole::initRoot(SCREEN_WIDTH, SCREEN_HEIGHT, "libtcod C++ tutorial", false);
-    TCOD_key_t key = {TCODK_NONE,0};
-    TCOD_mouse_t mouse;
-     
-    auto root_console = TCODConsole::root;
-    auto bar = new TCODConsole(SCREEN_WIDTH, Panel_height);
-
-    // _entities.reserve(1000);
+void new_game() {
     _entities.push_back(new Entity(SCREEN_WIDTH/2, SCREEN_HEIGHT/2, '@', TCODColor::white, "Player", true, render_priority.ENTITY));
     
-    Entity *player = _entities[0];
+    player = _entities[0];
     player->fighter = new Fighter(player, 30, 2, 5);
     player->inventory = new Inventory(player, 26);
-    
+
     // generate map and fov
     tcod_fov_map = new TCODMap(Map_Width, Map_Height);
     // Should separate fov from map_generate (make_room)
@@ -854,10 +847,21 @@ int main( int argc, char *argv[] ) {
     map_add_monsters(Max_monsters_per_room);
     map_add_items(Max_items_per_room);
 
-    GameState game_state = PLAYER_TURN;
-    GameState previous_game_state;
-
     gui_log_message(TCOD_light_azure, "Welcome %s \nA throne is the most devious trap of them all..", player->name.c_str());
+}
+
+int main( int argc, char *argv[] ) {
+    srand((unsigned int)time(NULL));
+
+    TCODConsole::setCustomFont("data/arial10x10.png", TCOD_FONT_TYPE_GREYSCALE | TCOD_FONT_LAYOUT_TCOD);
+    TCODConsole::initRoot(SCREEN_WIDTH, SCREEN_HEIGHT, "libtcod C++ tutorial", false);
+    TCOD_key_t key = {TCODK_NONE,0};
+    TCOD_mouse_t mouse;
+     
+    auto root_console = TCODConsole::root;
+    auto bar = new TCODConsole(SCREEN_WIDTH, Panel_height);
+
+    new_game();
 
     Context context = Context(_entities, tcod_fov_map);
     Entity *targeting_item = NULL;
