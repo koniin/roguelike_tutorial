@@ -830,13 +830,17 @@ void gui_render_inventory(TCODConsole *con, const std::string header, const Inve
 Entity *player;
 GameState game_state = PLAYER_TURN;
 GameState previous_game_state = PLAYER_TURN;
+Entity *targeting_item = NULL;
 
 void end_game() {
+    _event_queue.clear();
+    gui_log.clear();
     _entities.clear();
     rooms.clear();
     num_rooms = 0;
     delete tcod_fov_map;
     delete player;
+    targeting_item = NULL;
     
     Tile t_base;
     for(int x = 0; x < Map_Width; x++) {
@@ -867,7 +871,7 @@ void new_game() {
     map_add_monsters(Max_monsters_per_room);
     map_add_items(Max_items_per_room);
     
-    game_state = PLAYER_TURN;
+    game_state = PLAYER_TURN;    
 
     gui_log_message(TCOD_light_azure, "Welcome %s \nA throne is the most devious trap of them all..", player->name.c_str());
 }
@@ -884,9 +888,8 @@ int main( int argc, char *argv[] ) {
     auto bar = new TCODConsole(SCREEN_WIDTH, Panel_height);
 
     new_game();
-
     Context context = Context(_entities, tcod_fov_map);
-    Entity *targeting_item = NULL;
+    
     while ( !TCODConsole::isWindowClosed() ) {
         TCODSystem::checkForEvent(TCOD_EVENT_KEY_PRESS | TCOD_EVENT_MOUSE, &key, &mouse);
 
