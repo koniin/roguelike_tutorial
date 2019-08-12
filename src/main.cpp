@@ -13,8 +13,15 @@
 // Skipped things:
 // - A* movement for monsters (Part 6)
 // - Separate drop item inventory listing (Part 8)
+// - SAVING & LOADING => too many pointers and fucked up architecture
+//   - better handle that from the start on refactoring phase
 
 // Things to do
+
+// Intressant uppdelning 
+//   => http://i.imgur.com/PCKu0ip.png
+//  speciellt att ha olika "managers" som hanterar delar (som en 2 eller 3 - lagers arkitektur (services etc))
+
 // - fix event handling - what is what (message? seems like a shitty event)
 //      also logic in events? yeah why not, but whats the border between?
 // - marked_for_deletion to remove entities
@@ -602,9 +609,7 @@ void map_add_items(int max_items_per_room) {
             // We probably want some other way of generating the item etc
             // so this will change in the future anyway
             int chance = rand_int(0, 100);
-            chance = 85;
             if(chance < 70) {
-            
                 Entity *e;
                 e = new Entity(x, y, '!', TCOD_violet, "Health potion", false, render_priority.ITEM );
                 e->item = new Item();
@@ -824,7 +829,22 @@ void gui_render_inventory(TCODConsole *con, const std::string header, const Inve
 
 Entity *player;
 GameState game_state = PLAYER_TURN;
-GameState previous_game_state;
+GameState previous_game_state = PLAYER_TURN;
+
+void end_game() {
+    _entities.clear();
+    rooms.clear();
+    num_rooms = 0;
+    delete tcod_fov_map;
+    delete player;
+    
+    Tile t_base;
+    for(int x = 0; x < Map_Width; x++) {
+        for(int y = 0; y < Map_Height; y++) {
+            _map[map_index(x, y)] = t_base;   
+        }    
+    }
+}
 
 void new_game() {
     _entities.push_back(new Entity(SCREEN_WIDTH/2, SCREEN_HEIGHT/2, '@', TCODColor::white, "Player", true, render_priority.ENTITY));
@@ -846,6 +866,8 @@ void new_game() {
     // add entities to map
     map_add_monsters(Max_monsters_per_room);
     map_add_items(Max_items_per_room);
+    
+    game_state = PLAYER_TURN;
 
     gui_log_message(TCOD_light_azure, "Welcome %s \nA throne is the most devious trap of them all..", player->name.c_str());
 }
