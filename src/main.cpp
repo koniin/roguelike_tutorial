@@ -1006,10 +1006,14 @@ int main( int argc, char *argv[] ) {
             }
         } else if(game_state == MAIN_MENU) {
             int index = (int)key.c - (int)'a';
-            if(index >= 0 && index < 3) {    
+            if(index == 0) {    
                 new_game();
                 context.fov_map = tcod_fov_map;
                 context.entities = _entities;
+            } else if(index == 1) {
+                engine_log(LogStatus::Information, "Continue is not implemented (only show if available)");
+            } else if(index == 2) {
+                return 0;
             } else if(key.vk == TCODK_ESCAPE) {
                 return 0;
             } else if(key.vk == TCODK_ENTER) {
