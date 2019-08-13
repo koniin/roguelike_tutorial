@@ -22,6 +22,8 @@
 //   => http://i.imgur.com/PCKu0ip.png
 //  speciellt att ha olika "managers" som hanterar delar (som en 2 eller 3 - lagers arkitektur (services etc))
 
+// Look at Ben porter example game also!
+// And dod playground (at least ecs part with references to vector elements)
 // - fix event handling - what is what (message? seems like a shitty event)
 //      also logic in events? yeah why not, but whats the border between?
 // - marked_for_deletion to remove entities
