@@ -830,7 +830,7 @@ void gui_render_inventory(TCODConsole *con, const std::string header, const Inve
 
 void gui_render_main_menu(TCODConsole *con, int screen_width, int screen_height) {
     // static so only executed once
-    static TCODImage img("data/menu_background1.png");
+    static TCODImage img("data/menu_background.png");
     img.blit2x(con, 0, 0);
     
     con->setDefaultForeground(TCOD_light_yellow);
