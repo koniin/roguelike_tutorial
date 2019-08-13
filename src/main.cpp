@@ -74,7 +74,8 @@ enum GameState {
     PLAYER_TURN,
     ENEMY_TURN,
     SHOW_INVENTORY,
-    TARGETING
+    TARGETING,
+    MAIN_MENU
 };
 
 enum EventType {
@@ -827,9 +828,24 @@ void gui_render_inventory(TCODConsole *con, const std::string header, const Inve
     gui_render_menu(con, header, options, inventory_width, screen_width, screen_height);
 }
 
+void gui_render_main_menu(TCODConsole *con, int screen_width, int screen_height) {
+    // static so only executed once
+    static TCODImage img("data/menu_background1.png");
+    img.blit2x(con, 0, 0);
+    
+    con->setDefaultForeground(TCOD_light_yellow);
+    con->printEx(screen_width / 2, (screen_height / 2) - 4, TCOD_BKGND_NONE, TCOD_CENTER, 
+        "CASTLE OF THE DRAGON");
+    con->printEx(screen_width / 2, (screen_height / 2) - 3, TCOD_BKGND_NONE, TCOD_CENTER, 
+        "By Henke.");
+
+    static std::vector<std::string> options = { "New Game", "Continue", "Quit" }; 
+    gui_render_menu(con, "", options, 24, screen_width, screen_height);
+}
+
 Entity *player;
-GameState game_state = PLAYER_TURN;
-GameState previous_game_state = PLAYER_TURN;
+GameState game_state = MAIN_MENU;
+GameState previous_game_state = MAIN_MENU;
 Entity *targeting_item = NULL;
 
 void end_game() {
@@ -887,7 +903,6 @@ int main( int argc, char *argv[] ) {
     auto root_console = TCODConsole::root;
     auto bar = new TCODConsole(SCREEN_WIDTH, Panel_height);
 
-    new_game();
     Context context = Context(_entities, tcod_fov_map);
     
     while ( !TCODConsole::isWindowClosed() ) {
@@ -988,6 +1003,19 @@ int main( int argc, char *argv[] ) {
             } else if(key.vk == TCODK_ESCAPE || mouse.rbutton_pressed) {
                 game_state = previous_game_state;
                 events_queue({ EventType::Message, NULL, "Targeting cancelled", TCOD_yellow });   
+            }
+        } else if(game_state == MAIN_MENU) {
+            int index = (int)key.c - (int)'a';
+            if(index >= 0 && index < 3) {    
+                new_game();
+                context.fov_map = tcod_fov_map;
+                context.entities = _entities;
+            } else if(key.vk == TCODK_ESCAPE) {
+                return 0;
+            } else if(key.vk == TCODK_ENTER) {
+                if(key.lalt) {
+                    TCODConsole::setFullscreen(!TCODConsole::isFullscreen());
+                }
             }
         }
 
@@ -1094,49 +1122,55 @@ int main( int argc, char *argv[] ) {
         root_console->setDefaultForeground(TCODColor::white);
         root_console->clear();
 
-        for(int y = 0; y < Map_Height; y++) {
-            for(int x = 0; x < Map_Width; x++) {
-                if (tcod_fov_map->isInFov(x, y)) {
-                    _map[map_index(x, y)].explored = true;
+        if(game_state != MAIN_MENU) {
+            for(int y = 0; y < Map_Height; y++) {
+                for(int x = 0; x < Map_Width; x++) {
+                    if (tcod_fov_map->isInFov(x, y)) {
+                        _map[map_index(x, y)].explored = true;
 
-                    TCODConsole::root->setCharBackground(x, y,
-                        _map[map_index(x, y)].block_sight ? color_table.light_wall : color_table.light_ground );
-                } else if ( _map[map_index(x, y)].explored ) {
-                    TCODConsole::root->setCharBackground(x,y,
-                        _map[map_index(x, y)].block_sight ? color_table.dark_wall : color_table.dark_ground );
+                        TCODConsole::root->setCharBackground(x, y,
+                            _map[map_index(x, y)].block_sight ? color_table.light_wall : color_table.light_ground );
+                    } else if ( _map[map_index(x, y)].explored ) {
+                        TCODConsole::root->setCharBackground(x,y,
+                            _map[map_index(x, y)].block_sight ? color_table.dark_wall : color_table.dark_ground );
+                    }
                 }
             }
-        }
 
-        std::sort(_entities.begin(), _entities.end(), entity_render_sort);
+            std::sort(_entities.begin(), _entities.end(), entity_render_sort);
 
-        for(int i = 0; i < _entities.size(); i++) {
-            const auto entity = _entities[i];
-            if(!tcod_fov_map->isInFov(entity->x, entity->y)) {
-                continue;
+            for(int i = 0; i < _entities.size(); i++) {
+                const auto entity = _entities[i];
+                if(!tcod_fov_map->isInFov(entity->x, entity->y)) {
+                    continue;
+                }
+                root_console->setDefaultForeground(entity->color);
+                root_console->putChar(entity->x, entity->y, entity->gfx);
             }
-            root_console->setDefaultForeground(entity->color);
-            root_console->putChar(entity->x, entity->y, entity->gfx);
         }
 
         // UI RENDER
-        bar->setDefaultBackground(TCODColor::black);
-        bar->clear();
-        gui_render_bar(bar, 1, 1, Bar_width, "HP", player->fighter->hp, player->fighter->hp_max, TCOD_light_red, TCOD_darker_red);
-        gui_render_mouse_look(bar, mouse.cx, mouse.cy);
+        if(game_state != MAIN_MENU) {
+            bar->setDefaultBackground(TCODColor::black);
+            bar->clear();
+            gui_render_bar(bar, 1, 1, Bar_width, "HP", player->fighter->hp, player->fighter->hp_max, TCOD_light_red, TCOD_darker_red);
+            gui_render_mouse_look(bar, mouse.cx, mouse.cy);
 
-        float colorCoef = 0.4f;
-        for(int i = 0, y = 1; i < gui_log.size(); i++, y++) {
-            bar->setDefaultForeground(gui_log[i]->color * colorCoef);
-            bar->print(Log_x, y, gui_log[i]->text);
-            // could one-line this with a clamp;
-            if (colorCoef < 1.0f ) {
-                colorCoef += 0.3f;
+            float colorCoef = 0.4f;
+            for(int i = 0, y = 1; i < gui_log.size(); i++, y++) {
+                bar->setDefaultForeground(gui_log[i]->color * colorCoef);
+                bar->print(Log_x, y, gui_log[i]->text);
+                // could one-line this with a clamp;
+                if (colorCoef < 1.0f ) {
+                    colorCoef += 0.3f;
+                }
             }
+
+            TCODConsole::blit(bar, 0, 0, SCREEN_WIDTH, Panel_height, root_console, 0, Panel_y);
+        } else {
+            gui_render_main_menu(root_console, SCREEN_WIDTH, SCREEN_HEIGHT);
         }
-
-        TCODConsole::blit(bar, 0, 0, SCREEN_WIDTH, Panel_height, root_console, 0, Panel_y);
-
+        
         if(game_state == SHOW_INVENTORY) {
             gui_render_inventory(root_console, "Press the key next to an item to use it (hold alt to drop), or Esc to cancel.\n", *player->inventory, 50, SCREEN_WIDTH, SCREEN_HEIGHT);
         }
