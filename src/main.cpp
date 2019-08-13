@@ -7,7 +7,7 @@
 #include <functional>
 
 
-// http://rogueliketutorials.com/tutorials/tcod/part-10/
+// http://rogueliketutorials.com/tutorials/tcod/part-11/
 // http://www.roguebasin.com/index.php?title=Complete_roguelike_tutorial_using_C%2B%2B_and_libtcod_-_part_10.1:_persistence
 
 // Skipped things:
@@ -36,12 +36,28 @@
 // ECS
 // https://blog.therocode.net/2018/08/simplest-entity-component-system
 // https://austinmorlan.com/posts/entity_component_system/
-TCODMap *tcod_fov_map;
 
 int rand_int(int min, int max) {
     int lower = min;
     int upper = max;
     return (rand() % (upper - lower + 1)) + lower; 
+}
+
+struct Rect {
+    int x, y, w, h, x2, y2;
+};
+Rect rect_make(int x, int y, int w, int h) {
+    return { x, y, w, h, x + w, y + h };
+}
+
+void rect_center(const Rect &rect, int &x, int &y) {
+    x = rect.x + (rect.w / 2);
+    y = rect.y + (rect.h / 2);
+}
+
+bool rect_intersects(const Rect &r, const Rect &other) {
+    return r.x <= other.x2 && r.x2 >= other.x &&
+        r.y <= other.y2 && r.y2 >= other.y;
 }
 
 enum LogStatus {
@@ -96,6 +112,30 @@ void events_queue(Event e) {
     _event_queue.push_back(e);
 }
 
+    const int Map_Width = 80;
+    const int Map_Height = 43;
+    const int Room_max_size = 10;
+    const int Room_min_size = 6;
+    const int Max_rooms = 30;
+    const int Max_monsters_per_room = 3;
+    const int Max_items_per_room = 2;    
+    const TCOD_fov_algorithm_t fov_algorithm = FOV_BASIC;
+    const bool fov_light_walls = true;
+    const int fov_radius = 10;
+
+struct Tile {
+    bool blocked = true;
+    bool block_sight = true;
+    bool explored = false;
+};
+
+struct TileMap {
+    Tile tiles[Map_Width * Map_Height];
+    TCODMap *tcod_fov_map;
+    int num_rooms = 0;
+    std::vector<Rect> rooms;
+};
+
 struct Movement {
     int x, y;
 };
@@ -132,6 +172,8 @@ struct Entity {
     Item *item = NULL;
 };
 
+void move_towards(const TileMap &map, Entity *entity, int target_x, int target_y);
+
 struct ItemArgs {
     int amount = 0;
     float range = 0.0f;
@@ -142,10 +184,10 @@ struct ItemArgs {
 
 struct Context {
     std::vector<Entity *> &entities;
-    TCODMap *fov_map;
+    TileMap &map;
 
-    Context(std::vector<Entity *> &entities, TCODMap *fov_map) :
-        entities(entities), fov_map(fov_map) {}
+    Context(std::vector<Entity *> &entities, TileMap &map) :
+        entities(entities), map(map) {}
 };
 
 enum Targeting {
@@ -276,11 +318,9 @@ struct Fighter {
 };
 
 struct Ai {
-    virtual void take_turn(Entity *target) = 0;
+    virtual void take_turn(Entity *target, TileMap &map) = 0;
 };
 
-
-void move_towards(Entity *entity, int target_x, int target_y);
 float distance_to(int x, int y, int target_x, int target_y) {
     int dx = target_x - x;
     int dy = target_y - y;
@@ -289,13 +329,13 @@ float distance_to(int x, int y, int target_x, int target_y) {
 
 struct BasicMonster : Ai {
     Entity *_owner;
-    void take_turn(Entity *target) override {
-        if(tcod_fov_map->isInFov(_owner->x, _owner->y)) {
+    void take_turn(Entity *target, TileMap &map) override {
+        if(map.tcod_fov_map->isInFov(_owner->x, _owner->y)) {
             if(distance_to(_owner->x, _owner->y, target->x, target->y) >= 2.0f) {
 
                 // CAN REPLACE HITS WITH ASTAR MOVEMENT
 
-                move_towards(_owner, target->x, target->y);
+                move_towards(map, _owner, target->x, target->y);
             } else if(target->fighter->hp > 0) {
                 _owner->fighter->attack(target);
                 //printf("Deal damage to %s.\n", target->name);
@@ -313,7 +353,7 @@ struct ConfusedMonster : Ai {
     Entity *_owner;
     Ai *previous;
     int turns_remaining;
-    void take_turn(Entity *target) override {
+    void take_turn(Entity *target, TileMap &map) override {
         if(turns_remaining > 0) {
             turns_remaining--;
 
@@ -321,7 +361,7 @@ struct ConfusedMonster : Ai {
             int ry = _owner->y + rand_int(0, 2) - 1;
 
             if(rx != _owner->x && ry != _owner->y) {
-                move_towards(_owner, rx, ry);
+                move_towards(map, _owner, rx, ry);
             }
         } else {
             std::string msg = "The " + _owner->name + " is no longer confused!";
@@ -349,7 +389,7 @@ bool cast_lightning_bolt(Entity *caster, const ItemArgs &args, Context &context)
     Entity *closest = NULL;
     float closest_distance = 1000000.f;
     for(auto &e : context.entities) {
-        if(e->fighter && e != caster && context.fov_map->isInFov(e->x, e->y)) {
+        if(e->fighter && e != caster && context.map.tcod_fov_map->isInFov(e->x, e->y)) {
             float distance = distance_to(caster->x, caster->y, e->x, e->y);
             if(distance < closest_distance) {
                 closest = e;
@@ -370,7 +410,7 @@ bool cast_lightning_bolt(Entity *caster, const ItemArgs &args, Context &context)
 }
 
 bool cast_fireball(Entity *caster, const ItemArgs &args, Context &context) {
-    if(!context.fov_map->isInFov(args.target_x, args.target_y)) {
+    if(!context.map.tcod_fov_map->isInFov(args.target_x, args.target_y)) {
         events_queue({ EventType::Message, NULL, "You cannot target a tile outside your field of view.", TCOD_yellow });
         return false;
     }
@@ -390,7 +430,7 @@ bool cast_fireball(Entity *caster, const ItemArgs &args, Context &context) {
 }
 
 bool cast_confuse(Entity *caster, const ItemArgs &args, Context &context) {
-    if(!context.fov_map->isInFov(args.target_x, args.target_y)) {
+    if(!context.map.tcod_fov_map->isInFov(args.target_x, args.target_y)) {
         events_queue({ EventType::Message, NULL, "You cannot target a tile outside your field of view.", TCOD_yellow });
         return false;
     }
@@ -409,98 +449,52 @@ bool cast_confuse(Entity *caster, const ItemArgs &args, Context &context) {
     return false;
 }
 
-struct Tile {
-    bool blocked = true;
-    bool block_sight = true;
-    bool explored = false;
-};
-
-struct Rect {
-    int x, y, w, h, x2, y2;
-};
-Rect rect_make(int x, int y, int w, int h) {
-    return { x, y, w, h, x + w, y + h };
-}
-
-void rect_center(const Rect &rect, int &x, int &y) {
-    x = rect.x + (rect.w / 2);
-    y = rect.y + (rect.h / 2);
-}
-
-bool rect_intersects(const Rect &r, const Rect &other) {
-    return r.x <= other.x2 && r.x2 >= other.x &&
-        r.y <= other.y2 && r.y2 >= other.y;
-}
-
 // UI
 const int Bar_width = 20;
 const int Panel_height = 7;
 const int Panel_y = SCREEN_HEIGHT - Panel_height;
 //
 
-const int MAX_ENTITIES = 1000;
 std::vector<Entity*> _entities;
 
-const int Map_Width = 80;
-const int Map_Height = 43;
-const int Room_max_size = 10;
-const int Room_min_size = 6;
-const int Max_rooms = 30;
-Tile _map[Map_Width * Map_Height];
-
-int num_rooms = 0;
-std::vector<Rect> rooms;
-
-const TCOD_fov_algorithm_t fov_algorithm = FOV_BASIC;
-const bool fov_light_walls = true;
-const int fov_radius = 10;
-bool fov_recompute = true;
-
-const int Max_monsters_per_room = 3;
-const int Max_items_per_room = 2;
 
 int map_index(int x, int y) {
     return x + Map_Width * y;
 }
 
-bool map_blocked(int x, int y) {
-    if(_map[map_index(x, y)].blocked) {
+bool map_blocked(const TileMap &map, int x, int y) {
+    if(map.tiles[map_index(x, y)].blocked) {
         return true;
     }
     return false;
 }
 
-void map_make_room(const Rect &room) {
+void map_make_room(TileMap &map, const Rect &room) {
     for(int x = room.x + 1; x < room.x2; x++) {
         for(int y = room.y + 1; y < room.y2; y++) {
-            _map[map_index(x, y)].blocked = false;
-            _map[map_index(x, y)].block_sight = false;   
-            tcod_fov_map->setProperties(x, y, true, true);
+            map.tiles[map_index(x, y)].blocked = false;
+            map.tiles[map_index(x, y)].block_sight = false;   
+            map.tcod_fov_map->setProperties(x, y, true, true);
         }    
     }
-//     for x in range(room.x1 + 1, room.x2):
-// +           for y in range(room.y1 + 1, room.y2):
-// +               self.tiles[x][y].blocked = False
-// +               self.tiles[x][y].block_sight = False
-
 }
 
-void map_make_h_tunnel(int x1, int x2, int y) {
+void map_make_h_tunnel(TileMap &map, int x1, int x2, int y) {
     for(int x = std::min(x1, x2); x < std::max(x1, x2) + 1; x++) {
-        _map[map_index(x, y)].blocked = false;
-        _map[map_index(x, y)].block_sight = false;
-        tcod_fov_map->setProperties(x, y, true, true);
+        map.tiles[map_index(x, y)].blocked = false;
+        map.tiles[map_index(x, y)].block_sight = false;
+        map.tcod_fov_map->setProperties(x, y, true, true);
     }
 //     def create_h_tunnel(self, x1, x2, y):
 // +       for x in range(min(x1, x2), max(x1, x2) + 1):
 // +           self.tiles[x][y].blocked = False
 // +           self.tiles[x][y].block_sight = False
 }
-void map_make_v_tunnel(int y1, int y2, int x) {
+void map_make_v_tunnel(TileMap &map, int y1, int y2, int x) {
     for(int y = std::min(y1, y2); y < std::max(y1, y2) + 1; y++) {
-        _map[map_index(x, y)].blocked = false;
-        _map[map_index(x, y)].block_sight = false;
-        tcod_fov_map->setProperties(x, y, true, true);
+        map.tiles[map_index(x, y)].blocked = false;
+        map.tiles[map_index(x, y)].block_sight = false;
+        map.tcod_fov_map->setProperties(x, y, true, true);
     }
 // +   def create_v_tunnel(self, y1, y2, x):
 // +       for y in range(min(y1, y2), max(y1, y2) + 1):
@@ -508,7 +502,7 @@ void map_make_v_tunnel(int y1, int y2, int x) {
 // +           self.tiles[x][y].block_sight = False
 }
 
-void map_generate(int max_rooms, int room_min_size, int room_max_size, int map_width, int map_height) {
+void map_generate(TileMap &map, int max_rooms, int room_min_size, int room_max_size, int map_width, int map_height) {
     for(int i = 0; i < max_rooms; i++) {
         // random width and height
         int w = rand_int(room_min_size, room_max_size);
@@ -521,7 +515,7 @@ void map_generate(int max_rooms, int room_min_size, int room_max_size, int map_w
 
         // See if any room intersects
         bool intersects = false;
-        for(auto &r : rooms) {
+        for(auto &r : map.rooms) {
             if(rect_intersects(r, new_room)) {
                 intersects = true;
                 break;
@@ -533,29 +527,29 @@ void map_generate(int max_rooms, int room_min_size, int room_max_size, int map_w
         }
 
         // "paint" it to the map's tiles
-        map_make_room(new_room);
+        map_make_room(map, new_room);
         int new_x, new_y;
         rect_center(new_room, new_x, new_y);
 
-        if(num_rooms > 0) {
+        if(map.num_rooms > 0) {
             int prev_x, prev_y;
-            rect_center(rooms[num_rooms - 1], prev_x, prev_y);
+            rect_center(map.rooms[map.num_rooms - 1], prev_x, prev_y);
             if(rand_int(0, 1) == 1) {
-                map_make_h_tunnel(prev_x, new_x, prev_y);
-                map_make_v_tunnel(prev_y, new_y, new_x);
+                map_make_h_tunnel(map, prev_x, new_x, prev_y);
+                map_make_v_tunnel(map, prev_y, new_y, new_x);
             } else {
-                map_make_v_tunnel(prev_y, new_y, new_x);
-                map_make_h_tunnel(prev_x, new_x, prev_y);
+                map_make_v_tunnel(map, prev_y, new_y, new_x);
+                map_make_h_tunnel(map, prev_x, new_x, prev_y);
             }
         }
 
-        rooms.push_back(new_room);
-        num_rooms++;
+        map.rooms.push_back(new_room);
+        map.num_rooms++;
     }
 }
 
-void map_add_monsters(int max_monsters_per_room) {
-    for(const Rect &room : rooms) {
+void map_add_monsters(TileMap &map, int max_monsters_per_room) {
+    for(const Rect &room : map.rooms) {
         int number_of_monsters = rand_int(0, max_monsters_per_room);
         for(int i = 0; i < number_of_monsters; i++) {
             int x = rand_int(room.x + 1, room.x2 - 1); 
@@ -588,8 +582,8 @@ void map_add_monsters(int max_monsters_per_room) {
     }
 }
 
-void map_add_items(int max_items_per_room) {
-    for(const Rect &room : rooms) {
+void map_add_items(TileMap &map, int max_items_per_room) {
+    for(const Rect &room : map.rooms) {
         int number_of_monsters = rand_int(0, max_items_per_room);
         for(int i = 0; i < number_of_monsters; i++) {
             int x = rand_int(room.x + 1, room.x2 - 1); 
@@ -661,12 +655,12 @@ bool entity_blocking_at(int x, int y, Entity **found_entity) {
     return false;
 }
 
-bool can_walk(int x, int y) {
+bool can_walk(const TileMap &map, int x, int y) {
     Entity *target;
-    return !map_blocked(x, y) && !entity_blocking_at(x, y, &target);
+    return !map_blocked(map, x, y) && !entity_blocking_at(x, y, &target);
 }
 
-void move_towards(Entity *entity, int target_x, int target_y) {
+void move_towards(const TileMap &map, Entity *entity, int target_x, int target_y) {
     int dx, dy;
     dx = target_x - entity->x;
     dy = target_y - entity->y;
@@ -675,12 +669,12 @@ void move_towards(Entity *entity, int target_x, int target_y) {
     dx = (int)(round(dx/distance));
     dy = (int)(round(dy/distance));
 
-    if(can_walk(entity->x + dx, entity->y + dy)) {
+    if(can_walk(map, entity->x + dx, entity->y + dy)) {
         entity->x = entity->x + dx;
         entity->y = entity->y + dy;
-    } else if(can_walk(entity->x + dx, entity->y)) {
+    } else if(can_walk(map, entity->x + dx, entity->y)) {
         entity->x = entity->x + dx;
-    } else if(can_walk(entity->x, entity->y + dy)) {
+    } else if(can_walk(map, entity->x, entity->y + dy)) {
         entity->y = entity->y + dy;
     }
 }
@@ -759,8 +753,8 @@ void gui_log_message(const TCODColor &col, const char *text, ...) {
    } while ( lineEnd );
 }
 
-void gui_render_mouse_look(TCODConsole *con, int mouse_x, int mouse_y) {
-    if(!tcod_fov_map->isInFov(mouse_x, mouse_y)) {
+void gui_render_mouse_look(TCODConsole *con, const TileMap &map, int mouse_x, int mouse_y) {
+    if(!map.tcod_fov_map->isInFov(mouse_x, mouse_y)) {
         return;
     }
 
@@ -843,6 +837,8 @@ void gui_render_main_menu(TCODConsole *con, int screen_width, int screen_height)
     gui_render_menu(con, "", options, 24, screen_width, screen_height);
 }
 
+TileMap game_map;
+
 Entity *player;
 GameState game_state = MAIN_MENU;
 GameState previous_game_state = MAIN_MENU;
@@ -852,16 +848,16 @@ void end_game() {
     _event_queue.clear();
     gui_log.clear();
     _entities.clear();
-    rooms.clear();
-    num_rooms = 0;
-    delete tcod_fov_map;
+    game_map.rooms.clear();
+    game_map.num_rooms = 0;
+    delete game_map.tcod_fov_map;
     delete player;
     targeting_item = NULL;
     
     Tile t_base;
     for(int x = 0; x < Map_Width; x++) {
         for(int y = 0; y < Map_Height; y++) {
-            _map[map_index(x, y)] = t_base;   
+            game_map.tiles[map_index(x, y)] = t_base;   
         }    
     }
 }
@@ -874,18 +870,18 @@ void new_game() {
     player->inventory = new Inventory(player, 26);
 
     // generate map and fov
-    tcod_fov_map = new TCODMap(Map_Width, Map_Height);
+    game_map.tcod_fov_map = new TCODMap(Map_Width, Map_Height);
     // Should separate fov from map_generate (make_room)
-    map_generate(Max_rooms, Room_min_size, Room_max_size, Map_Width, Map_Height);
+    map_generate(game_map, Max_rooms, Room_min_size, Room_max_size, Map_Width, Map_Height);
     
     // Place player in first room
-    rect_center(rooms[0], player->x, player->y);
+    rect_center(game_map.rooms[0], player->x, player->y);
     // Setup fov from players position
-    tcod_fov_map->computeFov(player->x, player->y, fov_radius, fov_light_walls, fov_algorithm);
+    game_map.tcod_fov_map->computeFov(player->x, player->y, fov_radius, fov_light_walls, fov_algorithm);
 
     // add entities to map
-    map_add_monsters(Max_monsters_per_room);
-    map_add_items(Max_items_per_room);
+    map_add_monsters(game_map, Max_monsters_per_room);
+    map_add_items(game_map, Max_items_per_room);
     
     game_state = PLAYER_TURN;    
 
@@ -903,7 +899,7 @@ int main( int argc, char *argv[] ) {
     auto root_console = TCODConsole::root;
     auto bar = new TCODConsole(SCREEN_WIDTH, Panel_height);
 
-    Context context = Context(_entities, tcod_fov_map);
+    Context context = Context(_entities, game_map);
     
     while ( !TCODConsole::isWindowClosed() ) {
         TCODSystem::checkForEvent(TCOD_EVENT_KEY_PRESS | TCOD_EVENT_MOUSE, &key, &mouse);
@@ -1008,7 +1004,7 @@ int main( int argc, char *argv[] ) {
             int index = (int)key.c - (int)'a';
             if(index == 0) {    
                 new_game();
-                context.fov_map = tcod_fov_map;
+                context.map = game_map;
                 context.entities = _entities;
             } else if(index == 1) {
                 engine_log(LogStatus::Information, "Continue is not implemented (only show if available)");
@@ -1025,14 +1021,14 @@ int main( int argc, char *argv[] ) {
 
         if(game_state == PLAYER_TURN) {
             int dx = player->x + m.x, dy = player->y + m.y; 
-            if((m.x != 0 || m.y != 0) && !map_blocked(dx, dy)) {
+            if((m.x != 0 || m.y != 0) && !map_blocked(game_map, dx, dy)) {
                 Entity *target;
                 if(entity_blocking_at(dx, dy, &target)) {
                     player->fighter->attack(target);
                 } else {
                     player->x = dx;
                     player->y = dy;
-                    tcod_fov_map->computeFov(player->x, player->y, fov_radius, fov_light_walls, fov_algorithm);
+                    game_map.tcod_fov_map->computeFov(player->x, player->y, fov_radius, fov_light_walls, fov_algorithm);
                 }
 
                 game_state = ENEMY_TURN;
@@ -1055,7 +1051,7 @@ int main( int argc, char *argv[] ) {
             for(int i = 1; i < _entities.size(); i++) {
                 const auto entity = _entities[i];
                 if(!entity->marked_for_deletion && entity->ai) {
-                    entity->ai->take_turn(player);
+                    entity->ai->take_turn(player, game_map);
                 }
             }
 
@@ -1127,14 +1123,14 @@ int main( int argc, char *argv[] ) {
         if(game_state != MAIN_MENU) {
             for(int y = 0; y < Map_Height; y++) {
                 for(int x = 0; x < Map_Width; x++) {
-                    if (tcod_fov_map->isInFov(x, y)) {
-                        _map[map_index(x, y)].explored = true;
+                    if (game_map.tcod_fov_map->isInFov(x, y)) {
+                        game_map.tiles[map_index(x, y)].explored = true;
 
                         TCODConsole::root->setCharBackground(x, y,
-                            _map[map_index(x, y)].block_sight ? color_table.light_wall : color_table.light_ground );
-                    } else if ( _map[map_index(x, y)].explored ) {
+                            game_map.tiles[map_index(x, y)].block_sight ? color_table.light_wall : color_table.light_ground );
+                    } else if ( game_map.tiles[map_index(x, y)].explored ) {
                         TCODConsole::root->setCharBackground(x,y,
-                            _map[map_index(x, y)].block_sight ? color_table.dark_wall : color_table.dark_ground );
+                            game_map.tiles[map_index(x, y)].block_sight ? color_table.dark_wall : color_table.dark_ground );
                     }
                 }
             }
@@ -1143,7 +1139,7 @@ int main( int argc, char *argv[] ) {
 
             for(int i = 0; i < _entities.size(); i++) {
                 const auto entity = _entities[i];
-                if(!tcod_fov_map->isInFov(entity->x, entity->y)) {
+                if(!game_map.tcod_fov_map->isInFov(entity->x, entity->y)) {
                     continue;
                 }
                 root_console->setDefaultForeground(entity->color);
@@ -1156,7 +1152,7 @@ int main( int argc, char *argv[] ) {
             bar->setDefaultBackground(TCODColor::black);
             bar->clear();
             gui_render_bar(bar, 1, 1, Bar_width, "HP", player->fighter->hp, player->fighter->hp_max, TCOD_light_red, TCOD_darker_red);
-            gui_render_mouse_look(bar, mouse.cx, mouse.cy);
+            gui_render_mouse_look(bar, game_map, mouse.cx, mouse.cy);
 
             float colorCoef = 0.4f;
             for(int i = 0, y = 1; i < gui_log.size(); i++, y++) {
