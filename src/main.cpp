@@ -99,7 +99,8 @@ enum GameState {
 enum EventType {
     Message,
     EntityDead,
-    ItemPickup
+    ItemPickup,
+    NextFloor
 };
 struct Entity;
 struct Event {
@@ -131,11 +132,12 @@ struct Tile {
     bool explored = false;
 };
 
-struct TileMap {
+struct GameMap {
     Tile tiles[Map_Width * Map_Height];
     TCODMap *tcod_fov_map;
     int num_rooms = 0;
     std::vector<Rect> rooms;
+    int depth = 0;
 };
 
 struct Movement {
@@ -146,12 +148,14 @@ struct Fighter;
 struct Ai;
 struct Inventory;
 struct Item;
+struct Stairs;
 
 struct RenderPriority {
     // lower is lower prio
-    int CORPSE = 0;
-    int ITEM = 1;
-    int ENTITY = 2;
+    int STAIRS = 0;
+    int CORPSE = 1;
+    int ITEM = 2;
+    int ENTITY = 3;
 } render_priority;
 
 struct Entity {
@@ -172,9 +176,10 @@ struct Entity {
     Ai *ai = NULL;
     Inventory *inventory = NULL;
     Item *item = NULL;
+    Stairs *stairs = NULL;
 };
 
-void move_towards(const TileMap &map, Entity *entity, int target_x, int target_y);
+void move_towards(const GameMap &map, Entity *entity, int target_x, int target_y);
 
 struct ItemArgs {
     int amount = 0;
@@ -186,15 +191,21 @@ struct ItemArgs {
 
 struct Context {
     std::vector<Entity *> &entities;
-    TileMap &map;
+    GameMap &map;
 
-    Context(std::vector<Entity *> &entities, TileMap &map) :
+    Context(std::vector<Entity *> &entities, GameMap &map) :
         entities(entities), map(map) {}
 };
 
 enum Targeting {
     None,
     Position
+};
+
+struct Stairs {
+    int floor;
+
+    Stairs(int floor) : floor(floor) {} 
 };
 
 struct Item {
@@ -320,7 +331,7 @@ struct Fighter {
 };
 
 struct Ai {
-    virtual void take_turn(Entity *target, TileMap &map) = 0;
+    virtual void take_turn(Entity *target, GameMap &map) = 0;
 };
 
 float distance_to(int x, int y, int target_x, int target_y) {
@@ -331,7 +342,7 @@ float distance_to(int x, int y, int target_x, int target_y) {
 
 struct BasicMonster : Ai {
     Entity *_owner;
-    void take_turn(Entity *target, TileMap &map) override {
+    void take_turn(Entity *target, GameMap &map) override {
         if(map.tcod_fov_map->isInFov(_owner->x, _owner->y)) {
             if(distance_to(_owner->x, _owner->y, target->x, target->y) >= 2.0f) {
 
@@ -355,7 +366,7 @@ struct ConfusedMonster : Ai {
     Entity *_owner;
     Ai *previous;
     int turns_remaining;
-    void take_turn(Entity *target, TileMap &map) override {
+    void take_turn(Entity *target, GameMap &map) override {
         if(turns_remaining > 0) {
             turns_remaining--;
 
@@ -464,14 +475,14 @@ int map_index(int x, int y) {
     return x + Map_Width * y;
 }
 
-bool map_blocked(const TileMap &map, int x, int y) {
+bool map_blocked(const GameMap &map, int x, int y) {
     if(map.tiles[map_index(x, y)].blocked) {
         return true;
     }
     return false;
 }
 
-void map_make_room(TileMap &map, const Rect &room) {
+void map_make_room(GameMap &map, const Rect &room) {
     for(int x = room.x + 1; x < room.x2; x++) {
         for(int y = room.y + 1; y < room.y2; y++) {
             map.tiles[map_index(x, y)].blocked = false;
@@ -481,7 +492,7 @@ void map_make_room(TileMap &map, const Rect &room) {
     }
 }
 
-void map_make_h_tunnel(TileMap &map, int x1, int x2, int y) {
+void map_make_h_tunnel(GameMap &map, int x1, int x2, int y) {
     for(int x = std::min(x1, x2); x < std::max(x1, x2) + 1; x++) {
         map.tiles[map_index(x, y)].blocked = false;
         map.tiles[map_index(x, y)].block_sight = false;
@@ -492,7 +503,7 @@ void map_make_h_tunnel(TileMap &map, int x1, int x2, int y) {
 // +           self.tiles[x][y].blocked = False
 // +           self.tiles[x][y].block_sight = False
 }
-void map_make_v_tunnel(TileMap &map, int y1, int y2, int x) {
+void map_make_v_tunnel(GameMap &map, int y1, int y2, int x) {
     for(int y = std::min(y1, y2); y < std::max(y1, y2) + 1; y++) {
         map.tiles[map_index(x, y)].blocked = false;
         map.tiles[map_index(x, y)].block_sight = false;
@@ -504,7 +515,7 @@ void map_make_v_tunnel(TileMap &map, int y1, int y2, int x) {
 // +           self.tiles[x][y].block_sight = False
 }
 
-void map_generate(TileMap &map, int max_rooms, int room_min_size, int room_max_size, int map_width, int map_height) {
+void map_generate(GameMap &map, int max_rooms, int room_min_size, int room_max_size, int map_width, int map_height) {
     for(int i = 0; i < max_rooms; i++) {
         // random width and height
         int w = rand_int(room_min_size, room_max_size);
@@ -550,7 +561,7 @@ void map_generate(TileMap &map, int max_rooms, int room_min_size, int room_max_s
     }
 }
 
-void map_add_monsters(TileMap &map, int max_monsters_per_room) {
+void map_add_monsters(GameMap &map, int max_monsters_per_room) {
     for(const Rect &room : map.rooms) {
         int number_of_monsters = rand_int(0, max_monsters_per_room);
         for(int i = 0; i < number_of_monsters; i++) {
@@ -584,7 +595,7 @@ void map_add_monsters(TileMap &map, int max_monsters_per_room) {
     }
 }
 
-void map_add_items(TileMap &map, int max_items_per_room) {
+void map_add_items(GameMap &map, int max_items_per_room) {
     for(const Rect &room : map.rooms) {
         int number_of_monsters = rand_int(0, max_items_per_room);
         for(int i = 0; i < number_of_monsters; i++) {
@@ -646,6 +657,16 @@ void map_add_items(TileMap &map, int max_items_per_room) {
     }
 }
 
+void map_add_stairs(GameMap &map) {
+    auto &last_room = map.rooms[map.num_rooms - 1];
+    int center_x, center_y;
+    rect_center(last_room, center_x, center_y);
+    Entity *e;
+    e = new Entity(center_x, center_y, '>', TCOD_white, "Stairs", false, render_priority.STAIRS );
+    e->stairs = new Stairs(map.depth + 1);
+    _entities.push_back(e);
+}
+
 bool entity_blocking_at(int x, int y, Entity **found_entity) {
     for(int i = 0; i < _entities.size(); i++) {
         auto entity = _entities[i];
@@ -657,12 +678,12 @@ bool entity_blocking_at(int x, int y, Entity **found_entity) {
     return false;
 }
 
-bool can_walk(const TileMap &map, int x, int y) {
+bool can_walk(const GameMap &map, int x, int y) {
     Entity *target;
     return !map_blocked(map, x, y) && !entity_blocking_at(x, y, &target);
 }
 
-void move_towards(const TileMap &map, Entity *entity, int target_x, int target_y) {
+void move_towards(const GameMap &map, Entity *entity, int target_x, int target_y) {
     int dx, dy;
     dx = target_x - entity->x;
     dy = target_y - entity->y;
@@ -699,17 +720,6 @@ void gui_render_bar(TCODConsole *panel, int x, int y, int total_width, std::stri
 
     panel->setDefaultForeground(TCOD_white);
     panel->printEx(x + total_width / 2, y, TCOD_BKGND_NONE, TCOD_CENTER, "%s: %d/%d", name.c_str(), value, maximum);
-
-    // TCOD_console_set_default_background(panel, back_color);
-    // TCOD_console_rect(panel, x, y, total_width, 1, false, TCOD_BKGND_SCREEN);
-
-    // TCOD_console_set_default_background(panel, bar_color);
-    // if(bar_width > 0) {
-    //     TCOD_console_rect(panel, x, y, bar_width, 1, false, TCOD_BKGND_SCREEN);
-    // }
-
-    // TCOD_console_set_default_foreground(panel, TCOD_white);
-    // TCOD_console_print_ex(panel, x + total_width / 2, y, TCOD_BKGND_NONE, TCOD_CENTER, "%s: %d/%d", name.c_str(), value, maximum);
 }
 
 struct LogEntry {
@@ -755,7 +765,7 @@ void gui_log_message(const TCODColor &col, const char *text, ...) {
    } while ( lineEnd );
 }
 
-void gui_render_mouse_look(TCODConsole *con, const TileMap &map, int mouse_x, int mouse_y) {
+void gui_render_mouse_look(TCODConsole *con, const GameMap &map, int mouse_x, int mouse_y) {
     if(!map.tcod_fov_map->isInFov(mouse_x, mouse_y)) {
         return;
     }
@@ -839,21 +849,25 @@ void gui_render_main_menu(TCODConsole *con, int screen_width, int screen_height)
     gui_render_menu(con, "", options, 24, screen_width, screen_height);
 }
 
-TileMap game_map;
+GameMap game_map;
 
 Entity *player;
 GameState game_state = MAIN_MENU;
 GameState previous_game_state = MAIN_MENU;
 Entity *targeting_item = NULL;
 
-void end_game() {
+void end_floor() {
     _event_queue.clear();
     gui_log.clear();
+    for(auto &e : _entities) {
+        delete e;
+        // Needs better memory handling
+    }
     _entities.clear();
+    player = NULL;
     game_map.rooms.clear();
     game_map.num_rooms = 0;
     delete game_map.tcod_fov_map;
-    delete player;
     targeting_item = NULL;
     
     Tile t_base;
@@ -884,10 +898,37 @@ void new_game() {
     // add entities to map
     map_add_monsters(game_map, Max_monsters_per_room);
     map_add_items(game_map, Max_items_per_room);
+    map_add_stairs(game_map);
     
     game_state = PLAYER_TURN;    
 
     gui_log_message(TCOD_light_azure, "Welcome %s \nA throne is the most devious trap of them all..", player->name.c_str());
+}
+
+void next_floor(GameMap &map) {
+    map.depth += 1;
+    
+    for(int i = 1; i < _entities.size(); i++) {
+        delete _entities[i];
+    }
+    _entities.erase(_entities.begin() + 1, _entities.end());
+    
+    game_map.rooms.clear();
+    game_map.num_rooms = 0;
+    delete game_map.tcod_fov_map;
+
+    targeting_item = NULL;
+    
+    Tile t_base;
+    for(int x = 0; x < Map_Width; x++) {
+        for(int y = 0; y < Map_Height; y++) {
+            game_map.tiles[map_index(x, y)] = t_base;   
+        }    
+    }
+
+    player->fighter->heal(player->fighter->hp_max / 2);
+
+    events_queue({ EventType::Message, NULL, "You take a moment to rest, and recover your strength." });
 }
 
 int main( int argc, char *argv[] ) {
@@ -910,6 +951,7 @@ int main( int argc, char *argv[] ) {
         
         Movement m = { 0, 0 };
         bool pickup = false;
+        bool take_stairs = false;
         if(game_state == PLAYER_TURN) {    
             if(key.vk == TCODK_UP) {
                 m.y = -1;
@@ -936,6 +978,8 @@ int main( int argc, char *argv[] ) {
             } else if(key.c == 'i') {
                 previous_game_state = game_state;
                 game_state = SHOW_INVENTORY;
+            } else if(key.vk == TCODK_ENTER) {
+                take_stairs = true;
             } else if(key.vk == TCODK_ESCAPE) {
                 return 0;
             } else if(key.vk == TCODK_ENTER) {
@@ -1046,8 +1090,20 @@ int main( int argc, char *argv[] ) {
                 }
                 // if we still want to pickup after we checked entities there is nothing to pickup
                 if(pickup) {
-                    events_queue({ EventType::Message, NULL, "There is nothing here to pick up.", TCOD_yellow });                    
+                    events_queue({ EventType::Message, NULL, "There is nothing here to pick up.", TCOD_yellow });
                 }
+            } else if(take_stairs) {
+                for(int i = 0; i < _entities.size(); i++) {
+                    auto entity = _entities[i];
+                    if(player->x == entity->x && player->y == entity->y && entity->stairs) {
+                        events_queue({ EventType::NextFloor, entity });
+                        take_stairs = false;
+                        break;  
+                    }
+                }
+            }
+            if(take_stairs) {
+                events_queue({ EventType::Message, NULL, "There are no stairs here.", TCOD_yellow });
             }
         } else if(game_state == ENEMY_TURN) {
             for(int i = 1; i < _entities.size(); i++) {
@@ -1113,6 +1169,10 @@ int main( int argc, char *argv[] ) {
                     _entities.erase(_entities.begin() + index);
                     break;
                 }
+                case EventType::NextFloor: {
+                    next_floor(game_map);
+                    break;
+                }
             }
         }
         _event_queue.clear();
@@ -1141,9 +1201,11 @@ int main( int argc, char *argv[] ) {
 
             for(int i = 0; i < _entities.size(); i++) {
                 const auto entity = _entities[i];
-                if(!game_map.tcod_fov_map->isInFov(entity->x, entity->y)) {
+                if((entity->stairs && !game_map.tiles[map_index(entity->x, entity->y)].explored) 
+                    || !game_map.tcod_fov_map->isInFov(entity->x, entity->y)) {
                     continue;
                 }
+
                 root_console->setDefaultForeground(entity->color);
                 root_console->putChar(entity->x, entity->y, entity->gfx);
             }
@@ -1155,7 +1217,8 @@ int main( int argc, char *argv[] ) {
             bar->clear();
             gui_render_bar(bar, 1, 1, Bar_width, "HP", player->fighter->hp, player->fighter->hp_max, TCOD_light_red, TCOD_darker_red);
             gui_render_mouse_look(bar, game_map, mouse.cx, mouse.cy);
-
+            bar->printEx(1, 3, TCOD_BKGND_NONE, TCOD_LEFT, "Dungeon level: %d", game_map.depth);
+            
             float colorCoef = 0.4f;
             for(int i = 0, y = 1; i < gui_log.size(); i++, y++) {
                 bar->setDefaultForeground(gui_log[i]->color * colorCoef);
