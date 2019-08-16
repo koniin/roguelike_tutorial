@@ -7,8 +7,12 @@
 #include <functional>
 
 
-// http://rogueliketutorials.com/tutorials/tcod/part-12/
+// http://rogueliketutorials.com/tutorials/tcod/part-13/
 // http://www.roguebasin.com/index.php?title=Complete_roguelike_tutorial_using_C%2B%2B_and_libtcod_-_part_10.1:_persistence
+
+WE ARE AT
+"We need do adjust the way we get the values from Fighter. It’d be better if the max_hp, power, and "
+
 
 // Skipped things:
 // - A* movement for monsters (Part 6)
@@ -139,14 +143,19 @@ enum EventType {
     Message,
     EntityDead,
     ItemPickup,
-    NextFloor
+    NextFloor,
+    EquipmentChange
 };
+
 struct Entity;
+
+
 struct Event {
     EventType type;
     Entity *entity = NULL;
     std::string message;
     TCOD_color_t color;
+    int flag;
 };
 
 std::vector<Event> _event_queue; 
@@ -181,13 +190,6 @@ struct Movement {
     int x, y;
 };
 
-struct Fighter;
-struct Ai;
-struct Inventory;
-struct Item;
-struct Stairs;
-struct Level;
-
 struct RenderPriority {
     // lower is lower prio
     int STAIRS = 0;
@@ -195,6 +197,15 @@ struct RenderPriority {
     int ITEM = 2;
     int ENTITY = 3;
 } render_priority;
+
+struct Fighter;
+struct Ai;
+struct Inventory;
+struct Item;
+struct Stairs;
+struct Level;
+struct Equippable;
+struct Equipment;
 
 struct Entity {
     int x,y;
@@ -216,6 +227,8 @@ struct Entity {
     Item *item = NULL;
     Stairs *stairs = NULL;
     Level *level = NULL;
+    Equipment *equipment = NULL;
+    Equippable *equippable = NULL;
 };
 
 void move_towards(const GameMap &map, Entity *entity, int target_x, int target_y);
@@ -245,6 +258,76 @@ struct Stairs {
     int floor;
 
     Stairs(int floor) : floor(floor) {} 
+};
+
+enum EquipmentSlot {
+    MAIN_HAND,
+    OFF_HAND
+};
+struct Equippable {
+    EquipmentSlot slot;
+    int power_bonus;
+    int defense_bonus;
+    int max_hp_bonus;
+
+    Equippable(EquipmentSlot slot, int power_bonus, int defense_bonus, int max_hp_bonus) 
+        : slot(slot), power_bonus(power_bonus), defense_bonus(defense_bonus), max_hp_bonus(max_hp_bonus)
+        {}
+};
+struct Equipment {
+    Entity *main_hand = NULL;
+    Entity *off_hand = NULL;
+
+    int max_hp_bonus() {
+        int bonus = 0;
+        bonus += (main_hand && main_hand->equippable) ? main_hand->equippable->max_hp_bonus : 0;
+        bonus += (off_hand && off_hand->equippable) ? off_hand->equippable->max_hp_bonus : 0;
+        return bonus;
+    }
+
+    int power_bonus() {
+        int bonus = 0;
+        bonus += (main_hand && main_hand->equippable) ? main_hand->equippable->power_bonus : 0;
+        bonus += (off_hand && off_hand->equippable) ? off_hand->equippable->power_bonus : 0;
+        return bonus;
+    }
+
+    int defense_bonus() {
+        int bonus = 0;
+        bonus += (main_hand && main_hand->equippable) ? main_hand->equippable->defense_bonus : 0;
+        bonus += (off_hand && off_hand->equippable) ? off_hand->equippable->defense_bonus : 0;
+        return bonus;
+    }
+
+    void toggle_equipment(Entity *equippable_entity) {
+        auto slot = equippable_entity->equippable->slot;
+
+        if(slot == MAIN_HAND) {
+            if(main_hand == equippable_entity) {
+                events_queue({ EventType::EquipmentChange, equippable_entity, "", TCOD_amber, 0 });
+                main_hand = NULL;
+            } else {
+                if(main_hand) {
+                    events_queue({ EventType::EquipmentChange, main_hand, "", TCOD_amber, 0 });
+                }
+                main_hand = equippable_entity;
+                events_queue({ EventType::EquipmentChange, equippable_entity, "", TCOD_amber, 1 });
+            }
+        } else if(slot == OFF_HAND) {
+            if(off_hand == equippable_entity) {
+                events_queue({ EventType::EquipmentChange, equippable_entity, "", TCOD_amber, 0 });
+                off_hand = NULL;
+            } else {
+                if(off_hand) {
+                    events_queue({ EventType::EquipmentChange, off_hand, "", TCOD_amber, 0 });
+                }
+                off_hand = equippable_entity;
+                events_queue({ EventType::EquipmentChange, equippable_entity, "", TCOD_amber, 1 });
+            }
+        } else {
+            engine_log(LogStatus::Warning, "Equipment slot is not implemented " + std::to_string(slot));
+        }
+    }
 };
 
 struct Item {
@@ -277,11 +360,16 @@ struct Inventory {
     }
 
     bool use(Entity *item, Context &context) {
-        if(!item->item->on_use) {
+        if(item->equippable) {
+            _owner->equipment->toggle_equipment(item);
+            return false;
+        }
+
+        if(!item->item->on_use) {    
             std::string msg = "The " + item->item->name + " cannot be used.";
             events_queue({ EventType::Message, NULL, msg, TCOD_yellow});
             return false;
-        } 
+        }
 
         if(requires_target(item)) {
             return false;
@@ -973,9 +1061,9 @@ void gui_render_main_menu(TCODConsole *con, int screen_width, int screen_height)
 
 void gui_render_level_up_menu(TCODConsole *con, std::string header, Entity *player, int menu_width, int screen_width, int screen_height) {
     std::vector<std::string> options = {
-        "Constitution | +20 HP, current:" + player->fighter->hp,
-        "Strength | +1 attack, current:" + player->fighter->power,
-        "Agility | +1 defense, current:" + player->fighter->defense
+        "Constitution | +20 HP, current: " + std::to_string(player->fighter->hp),
+        "Strength | +1 attack, current: " + std::to_string(player->fighter->power),
+        "Agility | +1 defense, current: " + std::to_string(player->fighter->defense)
     };
 
     gui_render_menu(con, header, options, menu_width, screen_width, screen_height);
@@ -1028,6 +1116,7 @@ void new_game() {
     player->fighter = new Fighter(player, 100, 1, 4);
     player->inventory = new Inventory(player, 26);
     player->level = new Level();
+    player->equipment = new Equipment();
 
     // generate map and fov
     game_map.tcod_fov_map = new TCODMap(Map_Width, Map_Height);
@@ -1176,6 +1265,9 @@ int main( int argc, char *argv[] ) {
                     item_entity->y = player->y;
                     _entities.push_back(item_entity);
                     player->inventory->remove(item_entity);
+                    if(player->equipment->main_hand == item_entity || player->equipment->off_hand == item_entity) {
+                        player->equipment->toggle_equipment(item_entity);
+                    }
                     game_state = ENEMY_TURN;
                 } else {
                     if(player->inventory->requires_target(index)) {
@@ -1365,6 +1457,14 @@ int main( int argc, char *argv[] ) {
                 }
                 case EventType::NextFloor: {
                     next_floor(game_map);
+                    break;
+                }
+                case EventType::EquipmentChange: {
+                    if(e.flag == 0) {
+                        gui_log_message(TCOD_yellow, "You dequipped the %s", e.entity->item->name.c_str());
+                    } else if(e.flag == 1) {
+                        gui_log_message(TCOD_yellow, "You equipped the %s", e.entity->item->name.c_str());
+                    }
                     break;
                 }
             }
