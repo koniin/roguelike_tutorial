@@ -641,11 +641,11 @@ struct MonsterBlueprint {
 std::vector<MonsterBlueprint> monster_data = {  
     { 
         { { 80, 1 } },
-        "Orc", 'o', TCOD_desaturated_green, 10, 0, 3, 35 
+        "Orc", 'o', TCOD_desaturated_green, 10, 0, 4, 35 
     },
     { 
         { { 15, 3 }, { 30, 5 }, { 60, 7 } },
-        "Troll", 'T', TCOD_darker_green, 16, 1, 4, 100 
+        "Troll", 'T', TCOD_darker_green, 30, 2, 8, 100 
     }
 };
 void map_add_monsters(GameMap &map) {
@@ -752,10 +752,10 @@ void map_add_items(GameMap &map) {
             e->item = new Item();
             e->item->name = item.name;
             if(item.id == 0) {
-                e->item->args = { 4 };
+                e->item->args = { 40 };
                 e->item->on_use = cast_heal_entity;
             } else if(item.id == 1) {
-                e->item->args = { 12, 3 };
+                e->item->args = { 25, 3 };
                 e->item->on_use = cast_fireball;
                 e->item->targeting = Targeting::Position;
                 e->item->targeting_message = "Left-click a target tile for the fireball, or right click to cancel.";
@@ -764,7 +764,7 @@ void map_add_items(GameMap &map) {
                 e->item->targeting = Targeting::Position;
                 e->item->targeting_message = "Left-click an enemy to confuse it, or right click to cancel.";
             } else if(item.id == 3) {
-                e->item->args = { 20, 5 };
+                e->item->args = { 40, 5 };
                 e->item->on_use = cast_lightning_bolt;
             } else {
                 delete e;
