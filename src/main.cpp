@@ -69,6 +69,19 @@ int rand_weighted_index(int *chances, int size) {
     return choice;
 }
 
+struct WeightByLevel {
+    int weight;
+    int level;
+};
+int from_dungeon_level(std::vector<WeightByLevel> &table, int dungeon_level) {
+    for(size_t i = table.size(); i--;) {
+        if(dungeon_level >= table[i].level) {
+            return table[i].weight;
+        }
+    }
+    return 0;
+}
+
 struct Rect {
     int x, y, w, h, x2, y2;
 };
@@ -145,9 +158,7 @@ void events_queue(Event e) {
     const int Map_Height = 43;
     const int Room_max_size = 10;
     const int Room_min_size = 6;
-    const int Max_rooms = 30;
-    const int Max_monsters_per_room = 3;
-    const int Max_items_per_room = 2;    
+    const int Max_rooms = 30; 
     const TCOD_fov_algorithm_t fov_algorithm = FOV_BASIC;
     const bool fov_light_walls = true;
     const int fov_radius = 10;
@@ -163,7 +174,7 @@ struct GameMap {
     TCODMap *tcod_fov_map;
     int num_rooms = 0;
     std::vector<Rect> rooms;
-    int depth = 1;
+    int level = 1;
 };
 
 struct Movement {
@@ -618,22 +629,30 @@ void map_generate(GameMap &map, int max_rooms, int room_min_size, int room_max_s
 }
 
 struct MonsterBlueprint {
+    std::vector<WeightByLevel> weights;
+    std::string name;
     char visual;
     TCODColor color;
-    std::string name;
     int hp;
     int defense;
     int power;
     int xp;
 };
-std::vector<int> monster_weights = { 80, 20 };
 std::vector<MonsterBlueprint> monster_data = {  
-    { 'o', TCOD_desaturated_green, "Orc", 10, 0, 3, 35 },
-    { 'T', TCOD_darker_green, "Troll", 16, 1, 4, 100 }
+    { 
+        { { 80, 1 } },
+        "Orc", 'o', TCOD_desaturated_green, 10, 0, 3, 35 
+    },
+    { 
+        { { 15, 3 }, { 30, 5 }, { 60, 7 } },
+        "Troll", 'T', TCOD_darker_green, 16, 1, 4, 100 
+    }
 };
-void map_add_monsters(GameMap &map, int max_monsters_per_room) {
+void map_add_monsters(GameMap &map) {
     for(const Rect &room : map.rooms) {
-        int number_of_monsters = rand_int(0, max_monsters_per_room);
+        std::vector<WeightByLevel> weights = { { 2, 1 }, { 3, 4 }, { 5, 6 } };
+        int number_of_monsters = from_dungeon_level(weights, map.level);
+        // int number_of_monsters = rand_int(0, max_monsters_per_room);
         for(int i = 0; i < number_of_monsters; i++) {
             int x = rand_int(room.x + 1, room.x2 - 1); 
             int y = rand_int(room.y + 1, room.y2 - 1);
@@ -650,7 +669,14 @@ void map_add_monsters(GameMap &map, int max_monsters_per_room) {
                 continue;
             }
 
-            auto blueprint_index = rand_weighted_index(monster_weights.data(), monster_weights.size());
+            std::vector<int> chances;
+            chances.reserve(monster_data.size());
+            for(auto md : monster_data) {
+                int chance = from_dungeon_level(md.weights, map.level);
+                if(chance > 0)
+                    chances.push_back(chance);
+            }
+            auto blueprint_index = rand_weighted_index(chances.data(), chances.size());
             auto &m = monster_data[blueprint_index];
             Entity *e;
             e = new Entity(x, y, m.visual, m.color, m.name, true, render_priority.ENTITY );
@@ -661,11 +687,38 @@ void map_add_monsters(GameMap &map, int max_monsters_per_room) {
     }
 }
 
-std::vector<int> item_weights = { 70, 10, 10, 10 };
-void map_add_items(GameMap &map, int max_items_per_room) {
+
+struct ItemBlueprint {
+    std::vector<WeightByLevel> weights;
+    int id;
+    std::string name;
+    char visual;
+    TCODColor color;
+};
+std::vector<ItemBlueprint> item_data = {  
+    { 
+        { { 35, 1 } },
+        0, "Health Potion", '!', TCOD_violet
+    },
+    { 
+        { { 25, 4 } },
+        1, "Fireball Scroll", '#', TCOD_red
+    },
+    { 
+        { { 25, 6 } },
+        2, "Confusion Scroll", '#', TCOD_light_pink
+    },
+    { 
+        { { 10, 2 } },
+        3, "Lightning Scroll", '#', TCOD_violet
+    }
+};
+void map_add_items(GameMap &map) {
     for(const Rect &room : map.rooms) {
-        int number_of_monsters = rand_int(0, max_items_per_room);
-        for(int i = 0; i < number_of_monsters; i++) {
+        std::vector<WeightByLevel> weights = { {1, 1}, {2, 4} };
+        int number_of_items = from_dungeon_level(weights, map.level);
+        // int number_of_items = rand_int(0, max_items_per_room);
+        for(int i = 0; i < number_of_items; i++) {
             int x = rand_int(room.x + 1, room.x2 - 1); 
             int y = rand_int(room.y + 1, room.y2 - 1);
 
@@ -683,44 +736,43 @@ void map_add_items(GameMap &map, int max_items_per_room) {
 
             // We probably want some other way of generating the item etc
             // so this will change in the future anyway
-            
-            int index = rand_weighted_index(item_weights.data(), item_weights.size());
-            if(index == 0) {
-                Entity *e;
-                e = new Entity(x, y, '!', TCOD_violet, "Health potion", false, render_priority.ITEM );
-                e->item = new Item();
-                e->item->name = "Health potion";
+            std::vector<int> chances;
+            chances.reserve(item_data.size());
+            for(auto id : item_data) {
+                int chance = from_dungeon_level(id.weights, map.level);
+                if(chance > 0) {
+                    chances.push_back(chance);
+                }
+            }
+            auto blueprint_index = rand_weighted_index(chances.data(), chances.size());
+            auto &item = item_data[blueprint_index];
+            //int index = rand_weighted_index(item_weights.data(), item_weights.size());
+            Entity *e;
+            e = new Entity(x, y, item.visual, item.color, item.name, false, render_priority.ITEM );
+            e->item = new Item();
+            e->item->name = item.name;
+            if(item.id == 0) {
                 e->item->args = { 4 };
                 e->item->on_use = cast_heal_entity;
-                _entities.push_back(e);
-            } else if(index == 1) {
-                Entity *e;
-                e = new Entity(x, y, '#', TCOD_red, "Fireball scroll", false, render_priority.ITEM );
-                e->item = new Item();
-                e->item->name = "Fireball scroll";
+            } else if(item.id == 1) {
                 e->item->args = { 12, 3 };
                 e->item->on_use = cast_fireball;
                 e->item->targeting = Targeting::Position;
                 e->item->targeting_message = "Left-click a target tile for the fireball, or right click to cancel.";
-                _entities.push_back(e);
-            } else if(index == 2) {
-                Entity *e;
-                e = new Entity(x, y, '#', TCOD_light_pink, "Confusion scroll", false, render_priority.ITEM );
-                e->item = new Item();
-                e->item->name = "Confusion scroll";
+            } else if(item.id == 2) {
                 e->item->on_use = cast_confuse;
                 e->item->targeting = Targeting::Position;
                 e->item->targeting_message = "Left-click an enemy to confuse it, or right click to cancel.";
-                _entities.push_back(e);
-            } else {
-                Entity *e;
-                e = new Entity(x, y, '#', TCOD_violet, "Lightning scroll", false, render_priority.ITEM );
-                e->item = new Item();
-                e->item->name = "Lightning scroll";
+            } else if(item.id == 3) {
                 e->item->args = { 20, 5 };
                 e->item->on_use = cast_lightning_bolt;
-                _entities.push_back(e);
-            }            
+            } else {
+                delete e;
+                std::string message = "No item with id; " + std::to_string(item.id);
+                engine_log(LogStatus::Warning, message);
+                continue;
+            }
+            _entities.push_back(e);
         }
     }
 }
@@ -732,7 +784,7 @@ void map_add_stairs(GameMap &map) {
     rect_center(last_room, center_x, center_y);
     Entity *e;
     e = new Entity(center_x, center_y, '>', TCOD_white, "Stairs", false, render_priority.STAIRS );
-    e->stairs = new Stairs(map.depth + 1);
+    e->stairs = new Stairs(map.level + 1);
     _entities.push_back(e);
 }
 
@@ -959,33 +1011,6 @@ void gui_render_character_screen(TCODConsole *con, Entity *player, int character
     
     TCODConsole::blit(character_screen, 0, 0, character_screen_width, character_screen_height, 
                         con, x, y, 1.0, 0.7);
-
-/*
-+def character_screen(player, character_screen_width, character_screen_height, screen_width, screen_height):
-+   window = libtcod.console_new(character_screen_width, character_screen_height)
-+
-+   libtcod.console_set_default_foreground(window, libtcod.white)
-+
-+   libtcod.console_print_rect_ex(window, 0, 1, character_screen_width, character_screen_height, libtcod.BKGND_NONE,
-+                                 libtcod.LEFT, 'Character Information')
-+   libtcod.console_print_rect_ex(window, 0, 2, character_screen_width, character_screen_height, libtcod.BKGND_NONE,
-+                                 libtcod.LEFT, 'Level: {0}'.format(player.level.current_level))
-+   libtcod.console_print_rect_ex(window, 0, 3, character_screen_width, character_screen_height, libtcod.BKGND_NONE,
-+                                 libtcod.LEFT, 'Experience: {0}'.format(player.level.current_xp))
-+   libtcod.console_print_rect_ex(window, 0, 4, character_screen_width, character_screen_height, libtcod.BKGND_NONE,
-+                                 libtcod.LEFT, 'Experience to Level: {0}'.format(player.level.experience_to_next_level))
-+   libtcod.console_print_rect_ex(window, 0, 6, character_screen_width, character_screen_height, libtcod.BKGND_NONE,
-+                                 libtcod.LEFT, 'Maximum HP: {0}'.format(player.fighter.max_hp))
-+   libtcod.console_print_rect_ex(window, 0, 7, character_screen_width, character_screen_height, libtcod.BKGND_NONE,
-+                                 libtcod.LEFT, 'Attack: {0}'.format(player.fighter.power))
-+   libtcod.console_print_rect_ex(window, 0, 8, character_screen_width, character_screen_height, libtcod.BKGND_NONE,
-+                                 libtcod.LEFT, 'Defense: {0}'.format(player.fighter.defense))
-+
-+   x = screen_width // 2 - character_screen_width // 2
-+   y = screen_height // 2 - character_screen_height // 2
-+   libtcod.console_blit(window, 0, 0, character_screen_width, character_screen_height, 0, x, y, 1.0, 0.7)
-
- */
 }
 
 GameMap game_map;
@@ -999,7 +1024,7 @@ void new_game() {
     _entities.push_back(new Entity(SCREEN_WIDTH/2, SCREEN_HEIGHT/2, '@', TCODColor::white, "Player", true, render_priority.ENTITY));
     
     player = _entities[0];
-    player->fighter = new Fighter(player, 30, 2, 5);
+    player->fighter = new Fighter(player, 100, 1, 4);
     player->inventory = new Inventory(player, 26);
     player->level = new Level();
 
@@ -1014,8 +1039,8 @@ void new_game() {
     game_map.tcod_fov_map->computeFov(player->x, player->y, fov_radius, fov_light_walls, fov_algorithm);
 
     // add entities to map
-    map_add_monsters(game_map, Max_monsters_per_room);
-    map_add_items(game_map, Max_items_per_room);
+    map_add_monsters(game_map);
+    map_add_items(game_map);
     map_add_stairs(game_map);
     
     game_state = PLAYER_TURN;    
@@ -1024,7 +1049,7 @@ void new_game() {
 }
 
 void next_floor(GameMap &map) {
-    map.depth += 1;
+    map.level += 1;
     
     for(int i = 1; i < _entities.size(); i++) {
         if(_entities[i] != player)
@@ -1057,8 +1082,8 @@ void next_floor(GameMap &map) {
     game_map.tcod_fov_map->computeFov(player->x, player->y, fov_radius, fov_light_walls, fov_algorithm);
 
     // add entities to map
-    map_add_monsters(game_map, Max_monsters_per_room);
-    map_add_items(game_map, Max_items_per_room);
+    map_add_monsters(game_map);
+    map_add_items(game_map);
     map_add_stairs(game_map);
     
     game_state = PLAYER_TURN;
@@ -1383,7 +1408,7 @@ int main( int argc, char *argv[] ) {
             bar->clear();
             gui_render_bar(bar, 1, 1, Bar_width, "HP", player->fighter->hp, player->fighter->hp_max, TCOD_light_red, TCOD_darker_red);
             gui_render_mouse_look(bar, game_map, mouse.cx, mouse.cy);
-            bar->printEx(1, 3, TCOD_BKGND_NONE, TCOD_LEFT, "Dungeon level: %d", game_map.depth);
+            bar->printEx(1, 3, TCOD_BKGND_NONE, TCOD_LEFT, "Dungeon level: %d", game_map.level);
             
             float colorCoef = 0.4f;
             for(int i = 0, y = 1; i < gui_log.size(); i++, y++) {
