@@ -47,6 +47,28 @@ int rand_int(int min, int max) {
     return (rand() % (upper - lower + 1)) + lower; 
 }
 
+/// returns an weighted index from an array of weights 
+/// input e.g.: [10, 10, 80], 3
+/// output: one of 0, 1, 2 depending on rand_int result
+int rand_weighted_index(int *chances, int size) {
+    int sum_of_chances = 0;
+    for(int i = 0; i < size; i++) {
+        sum_of_chances += chances[i];
+    }
+    int random_chance = rand_int(1, sum_of_chances);
+
+    int running_sum = 0;
+    int choice = 0;
+    for(int i = 0; i < size; i++) {
+        running_sum += chances[i];
+        if(random_chance <= running_sum) {
+            return choice;
+        }
+        choice += 1;
+    }
+    return choice;
+}
+
 struct Rect {
     int x, y, w, h, x2, y2;
 };
@@ -595,6 +617,20 @@ void map_generate(GameMap &map, int max_rooms, int room_min_size, int room_max_s
     }
 }
 
+struct MonsterBlueprint {
+    char visual;
+    TCODColor color;
+    std::string name;
+    int hp;
+    int defense;
+    int power;
+    int xp;
+};
+std::vector<int> monster_weights = { 80, 20 };
+std::vector<MonsterBlueprint> monster_data = {  
+    { 'o', TCOD_desaturated_green, "Orc", 10, 0, 3, 35 },
+    { 'T', TCOD_darker_green, "Troll", 16, 1, 4, 100 }
+};
 void map_add_monsters(GameMap &map, int max_monsters_per_room) {
     for(const Rect &room : map.rooms) {
         int number_of_monsters = rand_int(0, max_monsters_per_room);
@@ -614,16 +650,12 @@ void map_add_monsters(GameMap &map, int max_monsters_per_room) {
                 continue;
             }
 
+            auto blueprint_index = rand_weighted_index(monster_weights.data(), monster_weights.size());
+            auto &m = monster_data[blueprint_index];
             Entity *e;
-            if(rand_int(0, 100) < 80) {
-                e = new Entity(x, y, 'o', TCOD_desaturated_green, "Orc", true, render_priority.ENTITY );
-                e->fighter = new Fighter(e, 10, 0, 3, 35);
-                e->ai = new BasicMonster(e);
-            } else {
-                e = new Entity(x, y, 'T', TCOD_darker_green, "Troll", true, render_priority.ENTITY );
-                e->fighter = new Fighter(e, 16, 1, 4, 100);
-                e->ai = new BasicMonster(e);
-            }
+            e = new Entity(x, y, m.visual, m.color, m.name, true, render_priority.ENTITY );
+            e->fighter = new Fighter(e, m.hp, m.defense, m.power, m.xp);
+            e->ai = new BasicMonster(e);
             _entities.push_back(e);            
         }
     }
