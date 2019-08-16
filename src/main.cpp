@@ -767,6 +767,7 @@ void map_add_items(GameMap &map) {
                 e->item->args = { 40, 5 };
                 e->item->on_use = cast_lightning_bolt;
             } else {
+                delete e->item;
                 delete e;
                 std::string message = "No item with id; " + std::to_string(item.id);
                 engine_log(LogStatus::Warning, message);
