@@ -661,6 +661,7 @@ void map_add_monsters(GameMap &map, int max_monsters_per_room) {
     }
 }
 
+std::vector<int> item_weights = { 70, 10, 10, 10 };
 void map_add_items(GameMap &map, int max_items_per_room) {
     for(const Rect &room : map.rooms) {
         int number_of_monsters = rand_int(0, max_items_per_room);
@@ -682,8 +683,9 @@ void map_add_items(GameMap &map, int max_items_per_room) {
 
             // We probably want some other way of generating the item etc
             // so this will change in the future anyway
-            int chance = rand_int(0, 100);
-            if(chance < 70) {
+            
+            int index = rand_weighted_index(item_weights.data(), item_weights.size());
+            if(index == 0) {
                 Entity *e;
                 e = new Entity(x, y, '!', TCOD_violet, "Health potion", false, render_priority.ITEM );
                 e->item = new Item();
@@ -691,7 +693,7 @@ void map_add_items(GameMap &map, int max_items_per_room) {
                 e->item->args = { 4 };
                 e->item->on_use = cast_heal_entity;
                 _entities.push_back(e);
-            } else if(chance < 80) {
+            } else if(index == 1) {
                 Entity *e;
                 e = new Entity(x, y, '#', TCOD_red, "Fireball scroll", false, render_priority.ITEM );
                 e->item = new Item();
@@ -701,7 +703,7 @@ void map_add_items(GameMap &map, int max_items_per_room) {
                 e->item->targeting = Targeting::Position;
                 e->item->targeting_message = "Left-click a target tile for the fireball, or right click to cancel.";
                 _entities.push_back(e);
-            } else if(chance < 90) {
+            } else if(index == 2) {
                 Entity *e;
                 e = new Entity(x, y, '#', TCOD_light_pink, "Confusion scroll", false, render_priority.ITEM );
                 e->item = new Item();
