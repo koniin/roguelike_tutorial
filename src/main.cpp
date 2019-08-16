@@ -24,6 +24,8 @@
 
 // Look at Ben porter example game also!
 // And dod playground (at least ecs part with references to vector elements)
+// - Component naming and split fighter into more components?
+// - also systems..
 // - fix event handling - what is what (message? seems like a shitty event)
 //      also logic in events? yeah why not, but whats the border between?
 // - marked_for_deletion to remove entities
@@ -93,7 +95,9 @@ enum GameState {
     ENEMY_TURN,
     SHOW_INVENTORY,
     TARGETING,
-    MAIN_MENU
+    MAIN_MENU,
+    LEVEL_UP,
+    CHARACTER_SCREEN
 };
 
 enum EventType {
@@ -137,7 +141,7 @@ struct GameMap {
     TCODMap *tcod_fov_map;
     int num_rooms = 0;
     std::vector<Rect> rooms;
-    int depth = 0;
+    int depth = 1;
 };
 
 struct Movement {
@@ -149,6 +153,7 @@ struct Ai;
 struct Inventory;
 struct Item;
 struct Stairs;
+struct Level;
 
 struct RenderPriority {
     // lower is lower prio
@@ -177,6 +182,7 @@ struct Entity {
     Inventory *inventory = NULL;
     Item *item = NULL;
     Stairs *stairs = NULL;
+    Level *level = NULL;
 };
 
 void move_towards(const GameMap &map, Entity *entity, int target_x, int target_y);
@@ -290,10 +296,11 @@ struct Fighter {
     int hp_max;
     int defense;
     int power;
+    int xp;
     Entity *_owner;
     
-    Fighter(Entity* owner, int hp_, int defense_, int power_) 
-        : hp(hp_), hp_max(hp_), defense(defense_), power(power_), _owner(owner) {}
+    Fighter(Entity* owner, int hp_, int defense_, int power_, int xp = 0) 
+        : hp(hp_), hp_max(hp_), defense(defense_), power(power_), _owner(owner), xp(xp) {}
 
     void take_damage(int amount) {
         hp -= amount;
@@ -386,6 +393,33 @@ struct ConfusedMonster : Ai {
 
     ConfusedMonster(Entity *owner, Ai *previous, int turns) 
         : _owner(owner), previous(previous), turns_remaining(turns) {}
+};
+
+struct Level {
+    int current_level;
+    int current_xp;
+    int level_up_base;
+    int level_up_factor;
+
+    Level(int current_level = 1, int current_xp = 0, int level_up_base = 200, int level_up_factor = 150) :
+        current_level(current_level), current_xp(current_xp), level_up_base(level_up_base), level_up_factor(level_up_factor) 
+    {}
+
+    int experience_to_next_level() {
+        return level_up_base + current_level * level_up_factor;
+    }
+
+    bool add_xp(int amount) {
+        current_xp += amount;
+
+        if(current_xp > experience_to_next_level()) {
+            current_xp -= experience_to_next_level();
+            current_level += 1;
+            return true;
+        } 
+
+        return false;
+    }
 };
 
 bool cast_heal_entity(Entity *entity, const ItemArgs &args, Context &context) {
@@ -583,11 +617,11 @@ void map_add_monsters(GameMap &map, int max_monsters_per_room) {
             Entity *e;
             if(rand_int(0, 100) < 80) {
                 e = new Entity(x, y, 'o', TCOD_desaturated_green, "Orc", true, render_priority.ENTITY );
-                e->fighter = new Fighter(e, 10, 0, 3);
+                e->fighter = new Fighter(e, 10, 0, 3, 35);
                 e->ai = new BasicMonster(e);
             } else {
                 e = new Entity(x, y, 'T', TCOD_darker_green, "Troll", true, render_priority.ENTITY );
-                e->fighter = new Fighter(e, 16, 1, 4);
+                e->fighter = new Fighter(e, 16, 1, 4, 100);
                 e->ai = new BasicMonster(e);
             }
             _entities.push_back(e);            
@@ -658,8 +692,8 @@ void map_add_items(GameMap &map, int max_items_per_room) {
 }
 
 void map_add_stairs(GameMap &map) {
-    // auto &last_room = map.rooms[map.num_rooms - 1];
-    auto &last_room = map.rooms[0];
+    auto &last_room = map.rooms[map.num_rooms - 1];
+    // auto &last_room = map.rooms[0];
     int center_x, center_y;
     rect_center(last_room, center_x, center_y);
     Entity *e;
@@ -850,6 +884,76 @@ void gui_render_main_menu(TCODConsole *con, int screen_width, int screen_height)
     gui_render_menu(con, "", options, 24, screen_width, screen_height);
 }
 
+void gui_render_level_up_menu(TCODConsole *con, std::string header, Entity *player, int menu_width, int screen_width, int screen_height) {
+    std::vector<std::string> options = {
+        "Constitution | +20 HP, current:" + player->fighter->hp,
+        "Strength | +1 attack, current:" + player->fighter->power,
+        "Agility | +1 defense, current:" + player->fighter->defense
+    };
+
+    gui_render_menu(con, header, options, menu_width, screen_width, screen_height);
+}
+
+TCODConsole *character_screen;
+void gui_render_character_screen(TCODConsole *con, Entity *player, int character_screen_width, int character_screen_height,  
+    int screen_width, int screen_height) {
+    // create an off-screen console that represents the menu's window
+    // SEEMS REALLY BAD TO KEEP CREATING NEW CONSOLE INSTANCES
+    if(character_screen) {
+        delete character_screen;
+    }
+    character_screen = new TCODConsole(character_screen_width, character_screen_height);
+
+    character_screen->setDefaultForeground(TCOD_white);
+    character_screen->printRectEx(0, 1, character_screen_width, character_screen_height, TCOD_BKGND_NONE, TCOD_LEFT,
+        "Character Information");
+    character_screen->printRectEx(0, 2, character_screen_width, character_screen_height, TCOD_BKGND_NONE, TCOD_LEFT,
+        "Level: %d", player->level->current_level);
+    character_screen->printRectEx(0, 3, character_screen_width, character_screen_height, TCOD_BKGND_NONE, TCOD_LEFT,
+        "Experience: %d", player->level->current_xp);
+    character_screen->printRectEx(0, 4, character_screen_width, character_screen_height, TCOD_BKGND_NONE, TCOD_LEFT,
+        "Experience to level: %d", player->level->experience_to_next_level());
+    character_screen->printRectEx(0, 6, character_screen_width, character_screen_height, TCOD_BKGND_NONE, TCOD_LEFT,
+        "Maximum HP: %d", player->fighter->hp_max);
+    character_screen->printRectEx(0, 7, character_screen_width, character_screen_height, TCOD_BKGND_NONE, TCOD_LEFT,
+        "Attack: %d", player->fighter->power);
+    character_screen->printRectEx(0, 8, character_screen_width, character_screen_height, TCOD_BKGND_NONE, TCOD_LEFT,
+        "Defense: %d", player->fighter->defense);
+
+    int x = screen_width / 2 - character_screen_width / 2;
+    int y = screen_height / 2 - character_screen_height / 2;
+    
+    TCODConsole::blit(character_screen, 0, 0, character_screen_width, character_screen_height, 
+                        con, x, y, 1.0, 0.7);
+
+/*
++def character_screen(player, character_screen_width, character_screen_height, screen_width, screen_height):
++   window = libtcod.console_new(character_screen_width, character_screen_height)
++
++   libtcod.console_set_default_foreground(window, libtcod.white)
++
++   libtcod.console_print_rect_ex(window, 0, 1, character_screen_width, character_screen_height, libtcod.BKGND_NONE,
++                                 libtcod.LEFT, 'Character Information')
++   libtcod.console_print_rect_ex(window, 0, 2, character_screen_width, character_screen_height, libtcod.BKGND_NONE,
++                                 libtcod.LEFT, 'Level: {0}'.format(player.level.current_level))
++   libtcod.console_print_rect_ex(window, 0, 3, character_screen_width, character_screen_height, libtcod.BKGND_NONE,
++                                 libtcod.LEFT, 'Experience: {0}'.format(player.level.current_xp))
++   libtcod.console_print_rect_ex(window, 0, 4, character_screen_width, character_screen_height, libtcod.BKGND_NONE,
++                                 libtcod.LEFT, 'Experience to Level: {0}'.format(player.level.experience_to_next_level))
++   libtcod.console_print_rect_ex(window, 0, 6, character_screen_width, character_screen_height, libtcod.BKGND_NONE,
++                                 libtcod.LEFT, 'Maximum HP: {0}'.format(player.fighter.max_hp))
++   libtcod.console_print_rect_ex(window, 0, 7, character_screen_width, character_screen_height, libtcod.BKGND_NONE,
++                                 libtcod.LEFT, 'Attack: {0}'.format(player.fighter.power))
++   libtcod.console_print_rect_ex(window, 0, 8, character_screen_width, character_screen_height, libtcod.BKGND_NONE,
++                                 libtcod.LEFT, 'Defense: {0}'.format(player.fighter.defense))
++
++   x = screen_width // 2 - character_screen_width // 2
++   y = screen_height // 2 - character_screen_height // 2
++   libtcod.console_blit(window, 0, 0, character_screen_width, character_screen_height, 0, x, y, 1.0, 0.7)
+
+ */
+}
+
 GameMap game_map;
 
 Entity *player;
@@ -863,6 +967,7 @@ void new_game() {
     player = _entities[0];
     player->fighter = new Fighter(player, 30, 2, 5);
     player->inventory = new Inventory(player, 26);
+    player->level = new Level();
 
     // generate map and fov
     game_map.tcod_fov_map = new TCODMap(Map_Width, Map_Height);
@@ -971,11 +1076,16 @@ int main( int argc, char *argv[] ) {
             } else if(key.c == 'f') {
                 m.x = 1;
                 m.y = 1;
+            } else if(key.c == 'z') {
+                game_state = ENEMY_TURN;
             } else if(key.c == 'g') {
                 pickup = true;
             } else if(key.c == 'i') {
                 previous_game_state = game_state;
                 game_state = SHOW_INVENTORY;
+            } else if(key.c == 'c') {
+                previous_game_state = game_state;
+                game_state = CHARACTER_SCREEN;
             } else if(key.vk == TCODK_ENTER) {
                 take_stairs = true;
             } else if(key.vk == TCODK_ESCAPE) {
@@ -1059,6 +1169,21 @@ int main( int argc, char *argv[] ) {
                     TCODConsole::setFullscreen(!TCODConsole::isFullscreen());
                 }
             }
+        } else if(game_state == LEVEL_UP) {
+            char key_char = key.c;
+            if(key_char == 'a') {
+                player->fighter->hp_max += 20;
+                player->fighter->hp += 20;
+                game_state = previous_game_state;
+            } else if(key_char == 'b') {
+                player->fighter->power += 1;
+                game_state = previous_game_state;
+            } else if(key_char == 'c') {
+                player->fighter->defense += 1;
+                game_state = previous_game_state;
+            }
+        } else if(key.vk == TCODK_ESCAPE) {
+            game_state = previous_game_state;
         }
 
         //// UPDATE
@@ -1132,6 +1257,17 @@ int main( int argc, char *argv[] ) {
                         player->render_order = render_priority.CORPSE;
                     } else {
                         gui_log_message(TCOD_light_green, "%s died!", e.entity->name.c_str());
+                        
+                        auto xp_gained = e.entity->fighter->xp;
+                        bool leveled_up = player->level->add_xp(xp_gained);
+                        gui_log_message(TCOD_yellow, "You gain %d experience points.", xp_gained);
+                        
+                        if(leveled_up) {
+                            gui_log_message(TCOD_yellow, "You become stronger! You reached level %d", player->level->current_level);
+                            previous_game_state = game_state;
+                            game_state = LEVEL_UP;
+                        }
+
                         e.entity->gfx = '%';
                         e.entity->color = TCOD_dark_red;
                         e.entity->render_order = render_priority.CORPSE;
@@ -1140,7 +1276,7 @@ int main( int argc, char *argv[] ) {
                         e.entity->fighter = NULL;
                         delete e.entity->ai;
                         e.entity->ai = NULL;
-                        e.entity->name = "remains of " + e.entity->name;                    
+                        e.entity->name = "remains of " + e.entity->name;
                     }
                     break;
                 }
@@ -1232,6 +1368,10 @@ int main( int argc, char *argv[] ) {
         
         if(game_state == SHOW_INVENTORY) {
             gui_render_inventory(root_console, "Press the key next to an item to use it (hold alt to drop), or Esc to cancel.\n", *player->inventory, 50, SCREEN_WIDTH, SCREEN_HEIGHT);
+        } else if(game_state == LEVEL_UP) {
+            gui_render_level_up_menu(root_console, "Level up! Choose a stat to raise:", player, 40, SCREEN_WIDTH, SCREEN_HEIGHT);
+        } else if(game_state == CHARACTER_SCREEN) {
+            gui_render_character_screen(root_console, player, 30, 10, SCREEN_WIDTH, SCREEN_HEIGHT);
         }
 
         TCODConsole::flush();
