@@ -658,7 +658,8 @@ void map_add_items(GameMap &map, int max_items_per_room) {
 }
 
 void map_add_stairs(GameMap &map) {
-    auto &last_room = map.rooms[map.num_rooms - 1];
+    // auto &last_room = map.rooms[map.num_rooms - 1];
+    auto &last_room = map.rooms[0];
     int center_x, center_y;
     rect_center(last_room, center_x, center_y);
     Entity *e;
@@ -856,28 +857,6 @@ GameState game_state = MAIN_MENU;
 GameState previous_game_state = MAIN_MENU;
 Entity *targeting_item = NULL;
 
-void end_floor() {
-    _event_queue.clear();
-    gui_log.clear();
-    for(auto &e : _entities) {
-        delete e;
-        // Needs better memory handling
-    }
-    _entities.clear();
-    player = NULL;
-    game_map.rooms.clear();
-    game_map.num_rooms = 0;
-    delete game_map.tcod_fov_map;
-    targeting_item = NULL;
-    
-    Tile t_base;
-    for(int x = 0; x < Map_Width; x++) {
-        for(int y = 0; y < Map_Height; y++) {
-            game_map.tiles[map_index(x, y)] = t_base;   
-        }    
-    }
-}
-
 void new_game() {
     _entities.push_back(new Entity(SCREEN_WIDTH/2, SCREEN_HEIGHT/2, '@', TCODColor::white, "Player", true, render_priority.ENTITY));
     
@@ -909,10 +888,12 @@ void next_floor(GameMap &map) {
     map.depth += 1;
     
     for(int i = 1; i < _entities.size(); i++) {
-        delete _entities[i];
+        if(_entities[i] != player)
+            delete _entities[i];
     }
-    _entities.erase(_entities.begin() + 1, _entities.end());
-    
+    _entities.erase(_entities.begin(), _entities.end());
+    _entities.push_back(player);
+
     game_map.rooms.clear();
     game_map.num_rooms = 0;
     delete game_map.tcod_fov_map;
@@ -925,6 +906,23 @@ void next_floor(GameMap &map) {
             game_map.tiles[map_index(x, y)] = t_base;   
         }    
     }
+
+    // generate map and fov
+    game_map.tcod_fov_map = new TCODMap(Map_Width, Map_Height);
+    // Should separate fov from map_generate (make_room)
+    map_generate(game_map, Max_rooms, Room_min_size, Room_max_size, Map_Width, Map_Height);
+    
+    // Place player in first room
+    rect_center(game_map.rooms[0], player->x, player->y);
+    // Setup fov from players position
+    game_map.tcod_fov_map->computeFov(player->x, player->y, fov_radius, fov_light_walls, fov_algorithm);
+
+    // add entities to map
+    map_add_monsters(game_map, Max_monsters_per_room);
+    map_add_items(game_map, Max_items_per_room);
+    map_add_stairs(game_map);
+    
+    game_state = PLAYER_TURN;
 
     player->fighter->heal(player->fighter->hp_max / 2);
 
@@ -1201,13 +1199,11 @@ int main( int argc, char *argv[] ) {
 
             for(int i = 0; i < _entities.size(); i++) {
                 const auto entity = _entities[i];
-                if((entity->stairs && !game_map.tiles[map_index(entity->x, entity->y)].explored) 
-                    || !game_map.tcod_fov_map->isInFov(entity->x, entity->y)) {
-                    continue;
+                if((entity->stairs && game_map.tiles[map_index(entity->x, entity->y)].explored) 
+                    || game_map.tcod_fov_map->isInFov(entity->x, entity->y)) {
+                    root_console->setDefaultForeground(entity->color);
+                    root_console->putChar(entity->x, entity->y, entity->gfx);
                 }
-
-                root_console->setDefaultForeground(entity->color);
-                root_console->putChar(entity->x, entity->y, entity->gfx);
             }
         }
 
