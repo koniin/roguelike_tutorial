@@ -19,6 +19,10 @@
 
 // Things to do
 
+// - input handling (check ben porter how its done)
+// - event handling and decoupling
+// - remove all the naked pointers (do this or ECS first?)
+
 // Intressant uppdelning 
 //   => http://i.imgur.com/PCKu0ip.png
 //  speciellt att ha olika "managers" som hanterar delar (som en 2 eller 3 - lagers arkitektur (services etc))
