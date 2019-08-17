@@ -10,6 +10,109 @@
 // http://rogueliketutorials.com/tutorials/tcod/part-13/
 // http://www.roguebasin.com/index.php?title=Complete_roguelike_tutorial_using_C%2B%2B_and_libtcod_-_part_10.1:_persistence
 
+////// ECS
+// #include <queue>
+// #include <bitset>
+
+// const unsigned ENTITY_INDEX_BITS = 22;
+// const unsigned ENTITY_INDEX_MASK = (1<<ENTITY_INDEX_BITS)-1;
+// const unsigned ENTITY_GENERATION_BITS = 8;
+// const unsigned ENTITY_GENERATION_MASK = (1<<ENTITY_GENERATION_BITS)-1;
+
+// typedef unsigned EntityId;
+
+// struct Entity {
+//     EntityId id = 0;
+//     unsigned index() const { return id & ENTITY_INDEX_MASK; }
+//     unsigned generation() const { return (id >> ENTITY_INDEX_BITS) & ENTITY_GENERATION_MASK; }
+//     bool equals(Entity other) {
+//         return id == other.id;
+//     }
+//     const bool equals(const Entity &other) const {
+//         return id == other.id;
+//     }
+// };
+
+// class ComponentID {
+//     static size_t counter;
+//     public:
+//         template<typename T>
+//         static size_t value() {
+//             static size_t id = counter++;
+//             return id;
+//         }
+// };
+
+// const unsigned MINIMUM_FREE_INDICES = 1024;
+// struct EntityManager {
+//     std::vector<unsigned char> _generation;
+//     std::queue<unsigned> _free_indices;
+
+//     Entity create() {
+//         unsigned idx;
+//         if (_free_indices.size() > MINIMUM_FREE_INDICES) {
+//             idx = _free_indices.front();
+//             _free_indices.pop();
+//         } else {
+//             _generation.push_back(0);
+//             idx = _generation.size() - 1;
+//             // ASSERT_WITH_MSG(idx < (1 << ENTITY_INDEX_BITS), "idx is malformed, larger than 22 bits?");
+//         }
+//         return make_entity(idx, _generation[idx]);
+//     }
+
+//     Entity make_entity(unsigned idx, unsigned char generation) {
+//         Entity e;
+//         auto id = generation << ENTITY_INDEX_BITS | idx;
+//         e.id = id;
+//         return e;
+//     }
+
+//     bool alive(Entity e) const {
+//         return _generation[e.index()] == e.generation();
+//     }
+
+//     void destroy(Entity e) {
+//         if(!alive(e))
+//             return;
+//         const unsigned idx = e.index();
+//         ++_generation[idx];
+//         _free_indices.push(idx);
+//     }
+// };
+
+// typedef std::bitset<512> ComponentMask;
+
+// struct PositionComponent { int x; };
+// struct VisualComponent { char visual; };
+// struct PlayerInput { int input; };
+// std::vector<Entity> entities;
+// struct Components {
+//     std::vector<PositionComponent> positions;
+//     std::vector<VisualComponent> visuals;
+//     std::vector<PlayerInput> player_inputs;
+// } comps;
+
+// template<typename ComponentType>
+// void add_component(EntityX &e, std::vector<ComponentType> &tv, const ComponentType &t) {
+//     tv[e.id] = t;
+//     e.bitset += 1;
+// }
+
+// void create_entity() {
+//     EntityX x = { 0, 1 };
+//     add_component(x, comps.positions, { 32 });
+// }
+
+// void sample_system(std::vector<PositionComponent> &positions) {
+//     int system_bitset = 2;
+//     for(auto &e : entities) {
+//         if(e.bitset & system_bitset) {
+//             auto &p = positions[e.id];
+//             p.x += 2;
+//         }
+//     }
+// }
 
 // Skipped things:
 // - A* movement for monsters (Part 6)
@@ -149,12 +252,12 @@ enum EventType {
     EquipmentChange
 };
 
-struct Entity;
+struct EntityFat;
 
 
 struct Event {
     EventType type;
-    Entity *entity = NULL;
+    EntityFat *entity = NULL;
     std::string message;
     TCOD_color_t color;
     int flag;
@@ -209,7 +312,7 @@ struct Level;
 struct Equippable;
 struct Equipment;
 
-struct Entity {
+struct EntityFat {
     int x,y;
     int gfx;
     TCODColor color;
@@ -218,7 +321,7 @@ struct Entity {
     int render_order = 0;
     bool marked_for_deletion = false;
 
-    Entity(int x_, int y_, int gfx_, TCODColor color_, std::string name_, bool blocks_, int render_order_) : 
+    EntityFat(int x_, int y_, int gfx_, TCODColor color_, std::string name_, bool blocks_, int render_order_) : 
         x(x_), y(y_), gfx(gfx_), color(color_), name(name_), blocks(blocks_), render_order(render_order_) {
     }
 
@@ -233,21 +336,21 @@ struct Entity {
     Equippable *equippable = NULL;
 };
 
-void move_towards(const GameMap &map, Entity *entity, int target_x, int target_y);
+void move_towards(const GameMap &map, EntityFat *entity, int target_x, int target_y);
 
 struct ItemArgs {
     int amount = 0;
     float range = 0.0f;
-    Entity *target = NULL;
+    EntityFat *target = NULL;
     int target_x = 0;
     int target_y = 0;
 };
 
 struct Context {
-    std::vector<Entity *> &entities;
+    std::vector<EntityFat *> &entities;
     GameMap &map;
 
-    Context(std::vector<Entity *> &entities, GameMap &map) :
+    Context(std::vector<EntityFat *> &entities, GameMap &map) :
         entities(entities), map(map) {}
 };
 
@@ -277,8 +380,8 @@ struct Equippable {
         {}
 };
 struct Equipment {
-    Entity *main_hand = NULL;
-    Entity *off_hand = NULL;
+    EntityFat *main_hand = NULL;
+    EntityFat *off_hand = NULL;
 
     int max_hp_bonus() {
         int bonus = 0;
@@ -301,7 +404,7 @@ struct Equipment {
         return bonus;
     }
 
-    void toggle_equipment(Entity *equippable_entity) {
+    void toggle_equipment(EntityFat *equippable_entity) {
         auto slot = equippable_entity->equippable->slot;
 
         if(slot == MAIN_HAND) {
@@ -335,21 +438,21 @@ struct Equipment {
 struct Item {
     int id;
     std::string name;
-    std::function<bool(Entity* entity, const ItemArgs &args, Context &context)> on_use = NULL;
+    std::function<bool(EntityFat* entity, const ItemArgs &args, Context &context)> on_use = NULL;
     ItemArgs args;
     Targeting targeting = Targeting::None;
     std::string targeting_message = "";
 };
 
 struct Inventory {
-    Entity *_owner;
-    std::vector<Entity*> items;
+    EntityFat *_owner;
+    std::vector<EntityFat*> items;
     int capacity;
-    Inventory(Entity *owner, int capacity) : _owner(owner), capacity(capacity) {}
+    Inventory(EntityFat *owner, int capacity) : _owner(owner), capacity(capacity) {}
 
     int _dirty_shit = 0;
 
-    bool add_item(Entity *item) {
+    bool add_item(EntityFat *item) {
         if(items.size() >= capacity) {
             return false;
         } 
@@ -361,7 +464,7 @@ struct Inventory {
         return use(items[index], context);
     }
 
-    bool use(Entity *item, Context &context) {
+    bool use(EntityFat *item, Context &context) {
         if(item->equippable) {
             _owner->equipment->toggle_equipment(item);
             return false;
@@ -387,7 +490,7 @@ struct Inventory {
         return requires_target(items[index]);
     }
 
-    bool requires_target(Entity *item) {    
+    bool requires_target(EntityFat *item) {    
         if(item->item->targeting == Targeting::None) {
             return false;
         }
@@ -397,7 +500,7 @@ struct Inventory {
         return false;
     }
 
-    void remove(Entity *item) {
+    void remove(EntityFat *item) {
         int delete_count = 0;
         int index = 0;
         for(auto &i : items) {
@@ -420,9 +523,9 @@ struct Fighter {
     int defense_max;
     int power_max;
     int xp;
-    Entity *_owner;
+    EntityFat *_owner;
     
-    Fighter(Entity* owner, int hp_, int defense_, int power_, int xp = 0) 
+    Fighter(EntityFat* owner, int hp_, int defense_, int power_, int xp = 0) 
         : hp(hp_), hp_max(hp_), defense_max(defense_), power_max(power_), _owner(owner), xp(xp) {}
 
     int max_hp() {
@@ -449,7 +552,7 @@ struct Fighter {
         }
     }
 
-    void attack(Entity *entity) {
+    void attack(EntityFat *entity) {
         int damage = power() - entity->fighter->defense();
 
         if(damage > 0) {
@@ -476,7 +579,7 @@ struct Fighter {
 };
 
 struct Ai {
-    virtual void take_turn(Entity *target, GameMap &map) = 0;
+    virtual void take_turn(EntityFat *target, GameMap &map) = 0;
 };
 
 float distance_to(int x, int y, int target_x, int target_y) {
@@ -486,8 +589,8 @@ float distance_to(int x, int y, int target_x, int target_y) {
 }
 
 struct BasicMonster : Ai {
-    Entity *_owner;
-    void take_turn(Entity *target, GameMap &map) override {
+    EntityFat *_owner;
+    void take_turn(EntityFat *target, GameMap &map) override {
         if(map.tcod_fov_map->isInFov(_owner->x, _owner->y)) {
             if(distance_to(_owner->x, _owner->y, target->x, target->y) >= 2.0f) {
 
@@ -502,16 +605,16 @@ struct BasicMonster : Ai {
         }
     }
 
-    BasicMonster(Entity *owner) {
+    BasicMonster(EntityFat *owner) {
         _owner = owner;
     }
 };
 
 struct ConfusedMonster : Ai {
-    Entity *_owner;
+    EntityFat *_owner;
     Ai *previous;
     int turns_remaining;
-    void take_turn(Entity *target, GameMap &map) override {
+    void take_turn(EntityFat *target, GameMap &map) override {
         if(turns_remaining > 0) {
             turns_remaining--;
 
@@ -529,7 +632,7 @@ struct ConfusedMonster : Ai {
         }
     }
 
-    ConfusedMonster(Entity *owner, Ai *previous, int turns) 
+    ConfusedMonster(EntityFat *owner, Ai *previous, int turns) 
         : _owner(owner), previous(previous), turns_remaining(turns) {}
 };
 
@@ -560,7 +663,7 @@ struct Level {
     }
 };
 
-bool cast_heal_entity(Entity *entity, const ItemArgs &args, Context &context) {
+bool cast_heal_entity(EntityFat *entity, const ItemArgs &args, Context &context) {
     if(entity->fighter->hp == entity->fighter->hp_max) {
         events_queue({ EventType::Message, NULL, "You are already at full health", TCOD_yellow });
         return false;
@@ -570,8 +673,8 @@ bool cast_heal_entity(Entity *entity, const ItemArgs &args, Context &context) {
     return true;
 }
 
-bool cast_lightning_bolt(Entity *caster, const ItemArgs &args, Context &context) {
-    Entity *closest = NULL;
+bool cast_lightning_bolt(EntityFat *caster, const ItemArgs &args, Context &context) {
+    EntityFat *closest = NULL;
     float closest_distance = 1000000.f;
     for(auto &e : context.entities) {
         if(e->fighter && e != caster && context.map.tcod_fov_map->isInFov(e->x, e->y)) {
@@ -594,7 +697,7 @@ bool cast_lightning_bolt(Entity *caster, const ItemArgs &args, Context &context)
     }
 }
 
-bool cast_fireball(Entity *caster, const ItemArgs &args, Context &context) {
+bool cast_fireball(EntityFat *caster, const ItemArgs &args, Context &context) {
     if(!context.map.tcod_fov_map->isInFov(args.target_x, args.target_y)) {
         events_queue({ EventType::Message, NULL, "You cannot target a tile outside your field of view.", TCOD_yellow });
         return false;
@@ -614,7 +717,7 @@ bool cast_fireball(Entity *caster, const ItemArgs &args, Context &context) {
     return true;
 }
 
-bool cast_confuse(Entity *caster, const ItemArgs &args, Context &context) {
+bool cast_confuse(EntityFat *caster, const ItemArgs &args, Context &context) {
     if(!context.map.tcod_fov_map->isInFov(args.target_x, args.target_y)) {
         events_queue({ EventType::Message, NULL, "You cannot target a tile outside your field of view.", TCOD_yellow });
         return false;
@@ -640,7 +743,7 @@ const int Panel_height = 7;
 const int Panel_y = SCREEN_HEIGHT - Panel_height;
 //
 
-std::vector<Entity*> _entities;
+std::vector<EntityFat*> _entities;
 
 
 int map_index(int x, int y) {
@@ -764,7 +867,7 @@ void map_add_monsters(GameMap &map) {
 
             bool occupied = false;
             for(int ei = 0; ei < _entities.size(); ei++) {
-                Entity *e = _entities[ei];
+                EntityFat *e = _entities[ei];
                 if(e->x == x && e->y == y) {
                     occupied = true;
                     break;
@@ -783,8 +886,8 @@ void map_add_monsters(GameMap &map) {
             }
             auto blueprint_index = rand_weighted_index(chances.data(), chances.size());
             auto &m = monster_data[blueprint_index];
-            Entity *e;
-            e = new Entity(x, y, m.visual, m.color, m.name, true, render_priority.ENTITY );
+            EntityFat *e;
+            e = new EntityFat(x, y, m.visual, m.color, m.name, true, render_priority.ENTITY );
             e->fighter = new Fighter(e, m.hp, m.defense, m.power, m.xp);
             e->ai = new BasicMonster(e);
             _entities.push_back(e);            
@@ -837,7 +940,7 @@ void map_add_items(GameMap &map) {
 
             bool occupied = false;
             for(int ei = 0; ei < _entities.size(); ei++) {
-                Entity *e = _entities[ei];
+                EntityFat *e = _entities[ei];
                 if(e->x == x && e->y == y) {
                     occupied = true;
                     break;
@@ -863,8 +966,8 @@ void map_add_items(GameMap &map) {
             auto blueprint_index = rand_weighted_index(chances.data(), chances.size());
             auto &item = item_data[blueprint_index];
             //int index = rand_weighted_index(item_weights.data(), item_weights.size());
-            Entity *e;
-            e = new Entity(x, y, item.visual, item.color, item.name, false, render_priority.ITEM );
+            EntityFat *e;
+            e = new EntityFat(x, y, item.visual, item.color, item.name, false, render_priority.ITEM );
             e->item = new Item();
             e->item->name = item.name;
             if(item.id == 0) {
@@ -903,13 +1006,13 @@ void map_add_stairs(GameMap &map) {
     // auto &last_room = map.rooms[0];
     int center_x, center_y;
     rect_center(last_room, center_x, center_y);
-    Entity *e;
-    e = new Entity(center_x, center_y, '>', TCOD_white, "Stairs", false, render_priority.STAIRS );
+    EntityFat *e;
+    e = new EntityFat(center_x, center_y, '>', TCOD_white, "Stairs", false, render_priority.STAIRS );
     e->stairs = new Stairs(map.level + 1);
     _entities.push_back(e);
 }
 
-bool entity_blocking_at(int x, int y, Entity **found_entity) {
+bool entity_blocking_at(int x, int y, EntityFat **found_entity) {
     for(int i = 0; i < _entities.size(); i++) {
         auto entity = _entities[i];
         if(x == entity->x && y == entity->y && entity->blocks) {
@@ -921,11 +1024,11 @@ bool entity_blocking_at(int x, int y, Entity **found_entity) {
 }
 
 bool can_walk(const GameMap &map, int x, int y) {
-    Entity *target;
+    EntityFat *target;
     return !map_blocked(map, x, y) && !entity_blocking_at(x, y, &target);
 }
 
-void move_towards(const GameMap &map, Entity *entity, int target_x, int target_y) {
+void move_towards(const GameMap &map, EntityFat *entity, int target_x, int target_y) {
     int dx, dy;
     dx = target_x - entity->x;
     dy = target_y - entity->y;
@@ -944,7 +1047,7 @@ void move_towards(const GameMap &map, Entity *entity, int target_x, int target_y
     }
 }
 
-bool entity_render_sort(const Entity *first, const Entity *second) {
+bool entity_render_sort(const EntityFat *first, const EntityFat *second) {
     return first->render_order < second->render_order;
 }
 
@@ -1063,7 +1166,7 @@ void gui_render_menu(TCODConsole *con, std::string header, const std::vector<std
     TCODConsole::blit(menu, 0, 0, width, height, con, x, y, 1.0, 0.7);
 }
 
-void gui_render_inventory(TCODConsole *con, const std::string header, const Entity *player, int inventory_width, int screen_width, int screen_height) {
+void gui_render_inventory(TCODConsole *con, const std::string header, const EntityFat *player, int inventory_width, int screen_width, int screen_height) {
     std::vector<std::string> options;
     if(player->inventory->items.size() == 0) {
         options.push_back("Inventory is empty.");
@@ -1097,7 +1200,7 @@ void gui_render_main_menu(TCODConsole *con, int screen_width, int screen_height)
     gui_render_menu(con, "", options, 24, screen_width, screen_height);
 }
 
-void gui_render_level_up_menu(TCODConsole *con, std::string header, Entity *player, int menu_width, int screen_width, int screen_height) {
+void gui_render_level_up_menu(TCODConsole *con, std::string header, EntityFat *player, int menu_width, int screen_width, int screen_height) {
     std::vector<std::string> options = {
         "Constitution | +20 HP, current: " + std::to_string(player->fighter->hp_max),
         "Strength | +1 attack, current: " + std::to_string(player->fighter->power_max),
@@ -1108,7 +1211,7 @@ void gui_render_level_up_menu(TCODConsole *con, std::string header, Entity *play
 }
 
 TCODConsole *character_screen;
-void gui_render_character_screen(TCODConsole *con, Entity *player, int character_screen_width, int character_screen_height,  
+void gui_render_character_screen(TCODConsole *con, EntityFat *player, int character_screen_width, int character_screen_height,  
     int screen_width, int screen_height) {
     // create an off-screen console that represents the menu's window
     // SEEMS REALLY BAD TO KEEP CREATING NEW CONSOLE INSTANCES
@@ -1142,13 +1245,13 @@ void gui_render_character_screen(TCODConsole *con, Entity *player, int character
 
 GameMap game_map;
 
-Entity *player;
+EntityFat *player;
 GameState game_state = MAIN_MENU;
 GameState previous_game_state = MAIN_MENU;
-Entity *targeting_item = NULL;
+EntityFat *targeting_item = NULL;
 
 void new_game() {
-    _entities.push_back(new Entity(SCREEN_WIDTH/2, SCREEN_HEIGHT/2, '@', TCODColor::white, "Player", true, render_priority.ENTITY));
+    _entities.push_back(new EntityFat(SCREEN_WIDTH/2, SCREEN_HEIGHT/2, '@', TCODColor::white, "Player", true, render_priority.ENTITY));
     
     player = _entities[0];
     player->fighter = new Fighter(player, 100, 1, 2);
@@ -1156,8 +1259,8 @@ void new_game() {
     player->level = new Level();
     player->equipment = new Equipment();
 
-    Entity *e;
-    e = new Entity(0, 0, '-', TCOD_sky, "Dagger", false, render_priority.ITEM);
+    EntityFat *e;
+    e = new EntityFat(0, 0, '-', TCOD_sky, "Dagger", false, render_priority.ITEM);
     e->item = new Item();
     e->item->name = "Dagger";
     e->equippable = new Equippable(MAIN_HAND, 2, 0, 0);
@@ -1390,7 +1493,7 @@ int main( int argc, char *argv[] ) {
         if(game_state == PLAYER_TURN) {
             int dx = player->x + m.x, dy = player->y + m.y; 
             if((m.x != 0 || m.y != 0) && !map_blocked(game_map, dx, dy)) {
-                Entity *target;
+                EntityFat *target;
                 if(entity_blocking_at(dx, dy, &target)) {
                     player->fighter->attack(target);
                 } else {
