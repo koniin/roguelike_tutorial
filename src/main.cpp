@@ -10,94 +10,142 @@
 // http://rogueliketutorials.com/tutorials/tcod/part-13/
 // http://www.roguebasin.com/index.php?title=Complete_roguelike_tutorial_using_C%2B%2B_and_libtcod_-_part_10.1:_persistence
 
+// ECS requirements
+// - find entity by id (or similar), e.g. events - get a handle on entities (alive or not?)
+// - systems -> iterate over entities
+
 ////// ECS
-// #include <queue>
-// #include <bitset>
+#include <queue>
+#include <bitset>
 
-// const unsigned ENTITY_INDEX_BITS = 22;
-// const unsigned ENTITY_INDEX_MASK = (1<<ENTITY_INDEX_BITS)-1;
-// const unsigned ENTITY_GENERATION_BITS = 8;
-// const unsigned ENTITY_GENERATION_MASK = (1<<ENTITY_GENERATION_BITS)-1;
+const unsigned ENTITY_INDEX_BITS = 22;
+const unsigned ENTITY_INDEX_MASK = (1<<ENTITY_INDEX_BITS)-1;
+const unsigned ENTITY_GENERATION_BITS = 8;
+const unsigned ENTITY_GENERATION_MASK = (1<<ENTITY_GENERATION_BITS)-1;
 
-// typedef unsigned EntityId;
+typedef unsigned EntityId;
 
-// struct Entity {
-//     EntityId id = 0;
-//     unsigned index() const { return id & ENTITY_INDEX_MASK; }
-//     unsigned generation() const { return (id >> ENTITY_INDEX_BITS) & ENTITY_GENERATION_MASK; }
-//     bool equals(Entity other) {
-//         return id == other.id;
-//     }
-//     const bool equals(const Entity &other) const {
-//         return id == other.id;
-//     }
-// };
+struct Entity {
+    EntityId id = 0;
+    unsigned index() const { return id & ENTITY_INDEX_MASK; }
+    unsigned generation() const { return (id >> ENTITY_INDEX_BITS) & ENTITY_GENERATION_MASK; }
+    bool equals(Entity other) {
+        return id == other.id;
+    }
+    const bool equals(const Entity &other) const {
+        return id == other.id;
+    }
+};
 
-// class ComponentID {
-//     static size_t counter;
-//     public:
-//         template<typename T>
-//         static size_t value() {
-//             static size_t id = counter++;
-//             return id;
-//         }
-// };
+class ComponentID {
+    static size_t counter;
+    public:
+        template<typename T>
+        static size_t value() {
+            static size_t id = counter++;
+            return id;
+        }
+};
+size_t ComponentID::counter = 0;
 
-// const unsigned MINIMUM_FREE_INDICES = 1024;
-// struct EntityManager {
-//     std::vector<unsigned char> _generation;
-//     std::queue<unsigned> _free_indices;
+const unsigned MINIMUM_FREE_INDICES = 1024;
+struct EntityManager {
+    std::vector<unsigned char> _generation;
+    std::queue<unsigned> _free_indices;
 
-//     Entity create() {
-//         unsigned idx;
-//         if (_free_indices.size() > MINIMUM_FREE_INDICES) {
-//             idx = _free_indices.front();
-//             _free_indices.pop();
-//         } else {
-//             _generation.push_back(0);
-//             idx = _generation.size() - 1;
-//             // ASSERT_WITH_MSG(idx < (1 << ENTITY_INDEX_BITS), "idx is malformed, larger than 22 bits?");
-//         }
-//         return make_entity(idx, _generation[idx]);
-//     }
+    Entity create() {
+        unsigned idx;
+        if (_free_indices.size() > MINIMUM_FREE_INDICES) {
+            idx = _free_indices.front();
+            _free_indices.pop();
+        } else {
+            _generation.push_back(0);
+            idx = _generation.size() - 1;
+            // ASSERT_WITH_MSG(idx < (1 << ENTITY_INDEX_BITS), "idx is malformed, larger than 22 bits?");
+        }
+        return make_entity(idx, _generation[idx]);
+    }
 
-//     Entity make_entity(unsigned idx, unsigned char generation) {
-//         Entity e;
-//         auto id = generation << ENTITY_INDEX_BITS | idx;
-//         e.id = id;
-//         return e;
-//     }
+    Entity make_entity(unsigned idx, unsigned char generation) {
+        Entity e;
+        auto id = generation << ENTITY_INDEX_BITS | idx;
+        e.id = id;
+        return e;
+    }
 
-//     bool alive(Entity e) const {
-//         return _generation[e.index()] == e.generation();
-//     }
+    bool alive(Entity e) const {
+        return _generation[e.index()] == e.generation();
+    }
 
-//     void destroy(Entity e) {
-//         if(!alive(e))
-//             return;
-//         const unsigned idx = e.index();
-//         ++_generation[idx];
-//         _free_indices.push(idx);
-//     }
-// };
+    void destroy(Entity e) {
+        if(!alive(e))
+            return;
+        const unsigned idx = e.index();
+        ++_generation[idx];
+        _free_indices.push(idx);
+    }
+};
 
-// typedef std::bitset<512> ComponentMask;
+typedef std::bitset<512> ComponentMask;
 
-// struct PositionComponent { int x; };
-// struct VisualComponent { char visual; };
-// struct PlayerInput { int input; };
-// std::vector<Entity> entities;
-// struct Components {
-//     std::vector<PositionComponent> positions;
-//     std::vector<VisualComponent> visuals;
-//     std::vector<PlayerInput> player_inputs;
-// } comps;
+struct PositionComponent { int x; };
+struct VisualComponent { char visual; };
+struct PlayerInput { int input; };
 
-// template<typename ComponentType>
-// void add_component(EntityX &e, std::vector<ComponentType> &tv, const ComponentType &t) {
-//     tv[e.id] = t;
-//     e.bitset += 1;
-// }
+const int MAX_ENTITIES = 1000;
+
+struct Components {
+    std::vector<Entity> entities;
+    std::vector<PositionComponent> positions;
+    std::vector<VisualComponent> visuals;
+    std::vector<PlayerInput> player_inputs;
+
+    struct Base_MI {};
+
+    template<typename Component>
+    struct MI : Base_MI {
+        std::vector<Component> *components;
+        MI(std::vector<Component> *components) : components(components) {
+            components->reserve(MAX_ENTITIES);
+        }
+    };
+
+    std::unordered_map<size_t, Base_MI*> c_map;
+
+    void init() {
+        c_map.emplace(ComponentID::value<PositionComponent>(), new MI<PositionComponent>(&positions) );
+        c_map.emplace(ComponentID::value<VisualComponent>(), new MI<VisualComponent>(&visuals) );
+        c_map.emplace(ComponentID::value<PlayerInput>(), new MI<PlayerInput>(&player_inputs) );
+    }
+} comps;
+
+template<typename ComponentType>
+void add_component(Entity &e, ComponentType &t) {
+    auto map_i = static_cast<Components::MI<ComponentType>*>(comps.c_map[ComponentID::value<ComponentType>()]);
+    auto container = static_cast<std::vector<ComponentType>*>(map_i->components);
+    container->push_back(t);
+    // container[e.index()] = t;
+    
+    // comps.entities[e.index()] = e;
+    
+    // ADD TO BITSET OF ENTITY
+}
+
+
+void test_entities() {
+    for(auto &pos : comps.positions) {
+        printf("pos: %d", pos.x);
+    }
+
+    comps.init();
+    EntityManager em;
+    auto e = em.create();
+    add_component(e, PositionComponent { 55 });
+
+    for(auto &pos : comps.positions) {
+        printf("pos: %d", pos.x);
+    }
+}
 
 // void create_entity() {
 //     EntityX x = { 0, 1 };
@@ -1527,10 +1575,10 @@ struct GamePlay : State {
                         break;  
                     }
                 }
-            }
-            if(take_stairs) {
-                events_queue({ EventType::Message, NULL, "There are no stairs here.", TCOD_yellow });
-            }
+                if(take_stairs) {
+                    events_queue({ EventType::Message, NULL, "There are no stairs here.", TCOD_yellow });
+                }
+            }    
         } else {
             for(int i = 1; i < _entities.size(); i++) {
                 const auto entity = _entities[i];
@@ -1648,7 +1696,7 @@ struct CharacterScreenState : State {
             game_state = previous_game_state;
         }
     };
-    
+
     void render() override {
         render_game();
         gui_render_character_screen(root_console, player, 30, 10, SCREEN_WIDTH, SCREEN_HEIGHT);
@@ -1656,6 +1704,8 @@ struct CharacterScreenState : State {
 };
 
 int main( int argc, char *argv[] ) {
+    test_entities();
+
     srand((unsigned int)time(NULL));
 
     TCODConsole::setCustomFont("data/arial10x10.png", TCOD_FONT_TYPE_GREYSCALE | TCOD_FONT_LAYOUT_TCOD);
