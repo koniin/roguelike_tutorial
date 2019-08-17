@@ -223,6 +223,11 @@ void engine_log(const LogStatus &status, const std::string &message) {
     }
 }
 
+bool engine_running = true;
+void engine_exit() {
+    engine_running = false;
+}
+
 const int SCREEN_WIDTH = 80;
 const int SCREEN_HEIGHT = 50;
 
@@ -1077,9 +1082,13 @@ struct LogEntry {
         free(text);
     } 
 };
+
 std::vector<LogEntry*> gui_log;
 static const int Log_x = Bar_width + 2;
 static const int Log_height = Panel_height - 1;
+TCODConsole *character_screen;
+TCODConsole *menu;
+
 void gui_log_message(const TCODColor &col, const char *text, ...) {
     va_list ap;
     char buf[128];
@@ -1131,7 +1140,6 @@ void gui_render_mouse_look(TCODConsole *con, const GameMap &map, int mouse_x, in
     con->print(1, 0, name_list.c_str());
 }
 
-TCODConsole *menu;
 void gui_render_menu(TCODConsole *con, std::string header, const std::vector<std::string> &options, 
     int width, int screen_width, int screen_height) {
     if(options.size() > 26) {
@@ -1210,7 +1218,6 @@ void gui_render_level_up_menu(TCODConsole *con, std::string header, EntityFat *p
     gui_render_menu(con, header, options, menu_width, screen_width, screen_height);
 }
 
-TCODConsole *character_screen;
 void gui_render_character_screen(TCODConsole *con, EntityFat *player, int character_screen_width, int character_screen_height,  
     int screen_width, int screen_height) {
     // create an off-screen console that represents the menu's window
@@ -1333,21 +1340,91 @@ void next_floor(GameMap &map) {
     events_queue({ EventType::Message, NULL, "You take a moment to rest, and recover your strength." });
 }
 
+// Input ---
+TCOD_key_t key = {TCODK_NONE,0};
+TCOD_mouse_t mouse;
+
+void input_update() {
+    TCODSystem::checkForEvent(TCOD_EVENT_KEY_PRESS | TCOD_EVENT_MOUSE, &key, &mouse);
+}
+
+bool input_key_pressed(char k) {
+    return key.c == k;
+}
+
+bool input_key_pressed(TCOD_keycode_t k) {
+    return key.vk == k;
+}
+
+char input_key_char_get() {
+    return key.c;
+}
+
+bool input_lalt() {
+    return key.lalt;
+}
+///
+
+// States --
+struct State {
+    virtual void update() = 0;
+    virtual void render() = 0;
+};
+
+struct StateNames {
+    int MAIN_MENU = 0;
+    int PLAYER_TURN = 1;
+    
+} state_names;
+
+int current_state = 0;
+std::unordered_map<int, State*> states;
+
+///
+
+struct MainMenu : State {
+    TCODConsole *root_console = TCODConsole::root;
+
+    void update() override {
+        int index = (int)input_key_char_get() - (int)'a';
+        if(index == 0) {    
+            new_game();
+        } else if(index == 1) {
+            engine_log(LogStatus::Information, "Continue is not implemented (only show if available)");
+        } else if(index == 2 || input_key_pressed(TCODK_ESCAPE)) {
+            engine_exit();
+        } else if(input_key_pressed(TCODK_ENTER) && input_lalt()) {
+            TCODConsole::setFullscreen(!TCODConsole::isFullscreen());
+        }
+    };
+
+    void render() override {
+        gui_render_main_menu(root_console, SCREEN_WIDTH, SCREEN_HEIGHT);
+    };
+};
+
+struct GamePlay : State {
+    void update() override {
+
+    };
+
+    void render() override {
+
+    };
+};
+
 int main( int argc, char *argv[] ) {
     srand((unsigned int)time(NULL));
 
     TCODConsole::setCustomFont("data/arial10x10.png", TCOD_FONT_TYPE_GREYSCALE | TCOD_FONT_LAYOUT_TCOD);
     TCODConsole::initRoot(SCREEN_WIDTH, SCREEN_HEIGHT, "libtcod C++ tutorial", false);
-    TCOD_key_t key = {TCODK_NONE,0};
-    TCOD_mouse_t mouse;
      
-    auto root_console = TCODConsole::root;
     auto bar = new TCODConsole(SCREEN_WIDTH, Panel_height);
 
-    Context context = Context(_entities, game_map);
-    
-    while ( !TCODConsole::isWindowClosed() ) {
-        TCODSystem::checkForEvent(TCOD_EVENT_KEY_PRESS | TCOD_EVENT_MOUSE, &key, &mouse);
+    states.insert({ state_names.MAIN_MENU, new MainMenu() });
+
+    while ( !TCODConsole::isWindowClosed() && engine_running ) {
+        input_update();
 
         //// INPUT
         
@@ -1426,14 +1503,11 @@ int main( int argc, char *argv[] ) {
                         game_state = TARGETING;
                         events_queue({ EventType::Message, NULL, targeting_item->item->targeting_message, TCOD_yellow });   
                     } else {
+                        Context context = Context(_entities, game_map);
                         bool consumed = player->inventory->use(index, context);
                         game_state = ENEMY_TURN;
                     }
                 }
-                //if(consumed) {
-                // trying to use an item always consumes the turn
-                
-                //}
             }
             
             if(key.vk == TCODK_ESCAPE) {
@@ -1449,6 +1523,7 @@ int main( int argc, char *argv[] ) {
                 //targeting_item->item->args.target_x
                 targeting_item->item->args.target_x = x;
                 targeting_item->item->args.target_y = y;
+                Context context = Context(_entities, game_map);
                 if(player->inventory->use(targeting_item, context)) {
                     game_state = ENEMY_TURN;
                 }
@@ -1457,20 +1532,7 @@ int main( int argc, char *argv[] ) {
                 events_queue({ EventType::Message, NULL, "Targeting cancelled", TCOD_yellow });   
             }
         } else if(game_state == MAIN_MENU) {
-            int index = (int)key.c - (int)'a';
-            if(index == 0) {    
-                new_game();
-                context.map = game_map;
-                context.entities = _entities;
-            } else if(index == 1) {
-                engine_log(LogStatus::Information, "Continue is not implemented (only show if available)");
-            } else if(index == 2 || key.vk == TCODK_ESCAPE) {
-                return 0;
-            } else if(key.vk == TCODK_ENTER) {
-                if(key.lalt) {
-                    TCODConsole::setFullscreen(!TCODConsole::isFullscreen());
-                }
-            }
+            states[state_names.MAIN_MENU]->update();
         } else if(game_state == LEVEL_UP) {
             char key_char = key.c;
             if(key_char == 'a') {
@@ -1622,7 +1684,7 @@ int main( int argc, char *argv[] ) {
         _event_queue.clear();
 
         //// RENDER
-
+        auto root_console = TCODConsole::root;
         root_console->setDefaultForeground(TCODColor::white);
         root_console->clear();
 
@@ -1673,7 +1735,7 @@ int main( int argc, char *argv[] ) {
 
             TCODConsole::blit(bar, 0, 0, SCREEN_WIDTH, Panel_height, root_console, 0, Panel_y);
         } else {
-            gui_render_main_menu(root_console, SCREEN_WIDTH, SCREEN_HEIGHT);
+            states[state_names.MAIN_MENU]->render();
         }
         
         if(game_state == SHOW_INVENTORY) {
