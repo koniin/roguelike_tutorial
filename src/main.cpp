@@ -228,6 +228,31 @@ void engine_exit() {
     engine_running = false;
 }
 
+// Input ---
+TCOD_key_t key = {TCODK_NONE,0};
+TCOD_mouse_t mouse;
+
+void input_update() {
+    TCODSystem::checkForEvent(TCOD_EVENT_KEY_PRESS | TCOD_EVENT_MOUSE, &key, &mouse);
+}
+
+bool input_key_pressed(char k) {
+    return key.c == k;
+}
+
+bool input_key_pressed(TCOD_keycode_t k) {
+    return key.vk == k;
+}
+
+char input_key_char_get() {
+    return key.c;
+}
+
+bool input_lalt() {
+    return key.lalt;
+}
+///
+
 const int SCREEN_WIDTH = 80;
 const int SCREEN_HEIGHT = 50;
 
@@ -1086,6 +1111,8 @@ struct LogEntry {
 std::vector<LogEntry*> gui_log;
 static const int Log_x = Bar_width + 2;
 static const int Log_height = Panel_height - 1;
+TCODConsole *root_console;
+TCODConsole *bar;
 TCODConsole *character_screen;
 TCODConsole *menu;
 
@@ -1340,30 +1367,52 @@ void next_floor(GameMap &map) {
     events_queue({ EventType::Message, NULL, "You take a moment to rest, and recover your strength." });
 }
 
-// Input ---
-TCOD_key_t key = {TCODK_NONE,0};
-TCOD_mouse_t mouse;
+void render_game() {
+    
+            for(int y = 0; y < Map_Height; y++) {
+                for(int x = 0; x < Map_Width; x++) {
+                    if (game_map.tcod_fov_map->isInFov(x, y)) {
+                        game_map.tiles[map_index(x, y)].explored = true;
 
-void input_update() {
-    TCODSystem::checkForEvent(TCOD_EVENT_KEY_PRESS | TCOD_EVENT_MOUSE, &key, &mouse);
+                        root_console->setCharBackground(x, y,
+                            game_map.tiles[map_index(x, y)].block_sight ? color_table.light_wall : color_table.light_ground );
+                    } else if ( game_map.tiles[map_index(x, y)].explored ) {
+                        root_console->setCharBackground(x,y,
+                            game_map.tiles[map_index(x, y)].block_sight ? color_table.dark_wall : color_table.dark_ground );
+                    }
+                }
+            }
+
+            std::sort(_entities.begin(), _entities.end(), entity_render_sort);
+
+            for(int i = 0; i < _entities.size(); i++) {
+                const auto entity = _entities[i];
+                if((entity->stairs && game_map.tiles[map_index(entity->x, entity->y)].explored) 
+                    || game_map.tcod_fov_map->isInFov(entity->x, entity->y)) {
+                    root_console->setDefaultForeground(entity->color);
+                    root_console->putChar(entity->x, entity->y, entity->gfx);
+                }
+            }
+        
+            bar->setDefaultBackground(TCODColor::black);
+            bar->clear();
+            gui_render_bar(bar, 1, 1, Bar_width, "HP", player->fighter->hp, player->fighter->hp_max, TCOD_light_red, TCOD_darker_red);
+            gui_render_mouse_look(bar, game_map, mouse.cx, mouse.cy);
+            bar->printEx(1, 3, TCOD_BKGND_NONE, TCOD_LEFT, "Dungeon level: %d", game_map.level);
+            
+            float colorCoef = 0.4f;
+            for(int i = 0, y = 1; i < gui_log.size(); i++, y++) {
+                bar->setDefaultForeground(gui_log[i]->color * colorCoef);
+                bar->print(Log_x, y, gui_log[i]->text);
+                // could one-line this with a clamp;
+                if (colorCoef < 1.0f ) {
+                    colorCoef += 0.3f;
+                }
+            }
+
+            TCODConsole::blit(bar, 0, 0, SCREEN_WIDTH, Panel_height, root_console, 0, Panel_y);
 }
 
-bool input_key_pressed(char k) {
-    return key.c == k;
-}
-
-bool input_key_pressed(TCOD_keycode_t k) {
-    return key.vk == k;
-}
-
-char input_key_char_get() {
-    return key.c;
-}
-
-bool input_lalt() {
-    return key.lalt;
-}
-///
 
 // States --
 struct State {
@@ -1374,6 +1423,12 @@ struct State {
 struct StateNames {
     int MAIN_MENU = 0;
     int PLAYER_TURN = 1;
+    int ENEMY_TURN = 2;
+    int PLAYER_DEAD = 3;
+    int SHOW_INVENTORY = 4;
+    int TARGETING = 5;
+    int LEVEL_UP = 6;
+    int CHARACTER_SCREEN = 7;
     
 } state_names;
 
@@ -1383,8 +1438,6 @@ std::unordered_map<int, State*> states;
 ///
 
 struct MainMenu : State {
-    TCODConsole *root_console = TCODConsole::root;
-
     void update() override {
         int index = (int)input_key_char_get() - (int)'a';
         if(index == 0) {    
@@ -1394,7 +1447,7 @@ struct MainMenu : State {
         } else if(index == 2) {
             engine_exit();
         }
-        
+
         if(input_key_pressed(TCODK_ESCAPE)) {
             engine_exit();
         } else if(input_key_pressed(TCODK_ENTER) && input_lalt()) {
@@ -1493,38 +1546,37 @@ struct PlayerTurn : State {
         }
     };
 
-    void render() override {
-
-    };
+    void render() override {};
 };
 
-int main( int argc, char *argv[] ) {
-    srand((unsigned int)time(NULL));
+struct EnemyTurn : State {
+    void update() override {
+        for(int i = 1; i < _entities.size(); i++) {
+             const auto entity = _entities[i];
+             if(!entity->marked_for_deletion && entity->ai) {
+                 entity->ai->take_turn(player, game_map);
+             }
+         }
 
-    TCODConsole::setCustomFont("data/arial10x10.png", TCOD_FONT_TYPE_GREYSCALE | TCOD_FONT_LAYOUT_TCOD);
-    TCODConsole::initRoot(SCREEN_WIDTH, SCREEN_HEIGHT, "libtcod C++ tutorial", false);
-     
-    auto bar = new TCODConsole(SCREEN_WIDTH, Panel_height);
-
-    states.insert({ state_names.MAIN_MENU, new MainMenu() });
-    states.insert({ state_names.PLAYER_TURN, new PlayerTurn() });
-
-    while ( !TCODConsole::isWindowClosed() && engine_running ) {
-        input_update();
-        
-        //// INPUT
-        
-        if(game_state == PLAYER_TURN) {    
-            states[state_names.PLAYER_TURN]->update();
-        } else if(game_state == PLAYER_DEAD) {
-            if(key.c == 'i') {
-                previous_game_state = game_state;
-                game_state = SHOW_INVENTORY;
-            } else if(key.vk == TCODK_ESCAPE) {
-                engine_exit();
-            }
-        } else if(game_state == SHOW_INVENTORY) {
-            int index = (int)key.c - (int)'a';
+        game_state = PLAYER_TURN;
+    };
+    void render() override {};
+};
+    
+struct PlayerDead : State {
+    void update() override {
+        if(input_key_pressed('i')) {
+            previous_game_state = game_state;
+            game_state = SHOW_INVENTORY;
+        } else if(input_key_pressed(TCODK_ESCAPE)) {
+            engine_exit();
+        }
+    };
+    void render() override {};
+};
+struct InventoryState : State {
+    void update() override {
+        int index = (int)key.c - (int)'a';
             if(index >= 0 && previous_game_state != PLAYER_DEAD && index < player->inventory->items.size()) {
                 if(key.lalt) {
                     // DROP ITEM
@@ -1554,8 +1606,14 @@ int main( int argc, char *argv[] ) {
             if(key.vk == TCODK_ESCAPE) {
                 game_state = previous_game_state;
             }
-        } else if(game_state == TARGETING) {
-            int x = mouse.cx, y = mouse.cy;            
+    };
+    void render() override {
+        gui_render_inventory(root_console, "Press the key next to an item to use it (hold alt to drop), or Esc to cancel.\n", player, 50, SCREEN_WIDTH, SCREEN_HEIGHT);
+    };
+};
+struct TargetingState : State {
+    void update() override {
+        int x = mouse.cx, y = mouse.cy;            
             if(mouse.lbutton_pressed) {
                 //targeting_item->item->args.target_x
                 targeting_item->item->args.target_x = x;
@@ -1568,10 +1626,12 @@ int main( int argc, char *argv[] ) {
                 game_state = previous_game_state;
                 events_queue({ EventType::Message, NULL, "Targeting cancelled", TCOD_yellow });   
             }
-        } else if(game_state == MAIN_MENU) {
-            states[state_names.MAIN_MENU]->update();
-        } else if(game_state == LEVEL_UP) {
-            char key_char = key.c;
+    };
+    void render() override {};
+};
+struct LevelUpState : State {
+    void update() override {
+        char key_char = key.c;
             if(key_char == 'a') {
                 player->fighter->hp_max += 20;
                 player->fighter->hp += 20;
@@ -1583,21 +1643,60 @@ int main( int argc, char *argv[] ) {
                 player->fighter->defense_max += 1;
                 game_state = previous_game_state;
             }
-        } else if(key.vk == TCODK_ESCAPE) {
+    };
+    void render() override {
+        gui_render_level_up_menu(root_console, "Level up! Choose a stat to raise:", player, 40, SCREEN_WIDTH, SCREEN_HEIGHT);
+    };
+};
+struct CharacterScreenState : State {
+    void update() override {
+        if(input_key_pressed(TCODK_ESCAPE)) {
             game_state = previous_game_state;
         }
+    };
+    void render() override {
+        gui_render_character_screen(root_console, player, 30, 10, SCREEN_WIDTH, SCREEN_HEIGHT);
+    };
+};
 
+int main( int argc, char *argv[] ) {
+    srand((unsigned int)time(NULL));
+
+    TCODConsole::setCustomFont("data/arial10x10.png", TCOD_FONT_TYPE_GREYSCALE | TCOD_FONT_LAYOUT_TCOD);
+    TCODConsole::initRoot(SCREEN_WIDTH, SCREEN_HEIGHT, "libtcod C++ tutorial", false);
+
+    root_console = TCODConsole::root;
+    bar = new TCODConsole(SCREEN_WIDTH, Panel_height);
+
+    states.insert({ state_names.MAIN_MENU, new MainMenu() });
+    states.insert({ state_names.PLAYER_TURN, new PlayerTurn() });
+    states.insert({ state_names.ENEMY_TURN, new EnemyTurn() });
+    states.insert({ state_names.PLAYER_DEAD, new PlayerDead() });
+    states.insert({ state_names.SHOW_INVENTORY , new InventoryState() });
+    states.insert({ state_names.TARGETING, new TargetingState() });
+    states.insert({ state_names.LEVEL_UP, new LevelUpState() });
+    states.insert({ state_names.CHARACTER_SCREEN, new CharacterScreenState() });
+
+    while ( !TCODConsole::isWindowClosed() && engine_running ) {
+        input_update();
+        
         //// UPDATE
-        if(game_state == ENEMY_TURN) {
-            for(int i = 1; i < _entities.size(); i++) {
-                const auto entity = _entities[i];
-                if(!entity->marked_for_deletion && entity->ai) {
-                    entity->ai->take_turn(player, game_map);
-                }
-            }
-
-           game_state = PLAYER_TURN;
-        }
+        
+        if(game_state == PLAYER_TURN) {    
+            states[state_names.PLAYER_TURN]->update();
+        } else if(game_state == PLAYER_DEAD) {
+            states[state_names.PLAYER_DEAD]->update();
+        } else if(game_state == SHOW_INVENTORY) {
+            states[state_names.SHOW_INVENTORY]->update();
+        } else if(game_state == TARGETING) {
+            states[state_names.TARGETING]->update();
+        } else if(game_state == MAIN_MENU) {
+            states[state_names.MAIN_MENU]->update();
+        } else if(game_state == LEVEL_UP) {
+            states[state_names.LEVEL_UP]->update();
+        } else if(game_state == ENEMY_TURN) {
+            states[state_names.ENEMY_TURN]->update();
+        } 
 
         // EVENTS
         for(auto &e : _event_queue) {
@@ -1680,66 +1779,22 @@ int main( int argc, char *argv[] ) {
         _event_queue.clear();
 
         //// RENDER
-        auto root_console = TCODConsole::root;
+        
         root_console->setDefaultForeground(TCODColor::white);
         root_console->clear();
 
         if(game_state != MAIN_MENU) {
-            for(int y = 0; y < Map_Height; y++) {
-                for(int x = 0; x < Map_Width; x++) {
-                    if (game_map.tcod_fov_map->isInFov(x, y)) {
-                        game_map.tiles[map_index(x, y)].explored = true;
-
-                        TCODConsole::root->setCharBackground(x, y,
-                            game_map.tiles[map_index(x, y)].block_sight ? color_table.light_wall : color_table.light_ground );
-                    } else if ( game_map.tiles[map_index(x, y)].explored ) {
-                        TCODConsole::root->setCharBackground(x,y,
-                            game_map.tiles[map_index(x, y)].block_sight ? color_table.dark_wall : color_table.dark_ground );
-                    }
-                }
-            }
-
-            std::sort(_entities.begin(), _entities.end(), entity_render_sort);
-
-            for(int i = 0; i < _entities.size(); i++) {
-                const auto entity = _entities[i];
-                if((entity->stairs && game_map.tiles[map_index(entity->x, entity->y)].explored) 
-                    || game_map.tcod_fov_map->isInFov(entity->x, entity->y)) {
-                    root_console->setDefaultForeground(entity->color);
-                    root_console->putChar(entity->x, entity->y, entity->gfx);
-                }
-            }
-        }
-
-        // UI RENDER
-        if(game_state != MAIN_MENU) {
-            bar->setDefaultBackground(TCODColor::black);
-            bar->clear();
-            gui_render_bar(bar, 1, 1, Bar_width, "HP", player->fighter->hp, player->fighter->hp_max, TCOD_light_red, TCOD_darker_red);
-            gui_render_mouse_look(bar, game_map, mouse.cx, mouse.cy);
-            bar->printEx(1, 3, TCOD_BKGND_NONE, TCOD_LEFT, "Dungeon level: %d", game_map.level);
-            
-            float colorCoef = 0.4f;
-            for(int i = 0, y = 1; i < gui_log.size(); i++, y++) {
-                bar->setDefaultForeground(gui_log[i]->color * colorCoef);
-                bar->print(Log_x, y, gui_log[i]->text);
-                // could one-line this with a clamp;
-                if (colorCoef < 1.0f ) {
-                    colorCoef += 0.3f;
-                }
-            }
-
-            TCODConsole::blit(bar, 0, 0, SCREEN_WIDTH, Panel_height, root_console, 0, Panel_y);
+            render_game();
         } else {
             states[state_names.MAIN_MENU]->render();
         }
         
         if(game_state == SHOW_INVENTORY) {
-            gui_render_inventory(root_console, "Press the key next to an item to use it (hold alt to drop), or Esc to cancel.\n", player, 50, SCREEN_WIDTH, SCREEN_HEIGHT);
+            states[state_names.SHOW_INVENTORY]->render();
         } else if(game_state == LEVEL_UP) {
-            gui_render_level_up_menu(root_console, "Level up! Choose a stat to raise:", player, 40, SCREEN_WIDTH, SCREEN_HEIGHT);
+            states[state_names.LEVEL_UP]->render();
         } else if(game_state == CHARACTER_SCREEN) {
-            gui_render_character_screen(root_console, player, 30, 10, SCREEN_WIDTH, SCREEN_HEIGHT);
+            states[state_names.CHARACTER_SCREEN]->render();
         }
 
         TCODConsole::flush();
