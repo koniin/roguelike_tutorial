@@ -22,6 +22,7 @@
 // - input handling (check ben porter how its done)
 // - event handling and decoupling
 // - remove all the naked pointers (do this or ECS first?)
+// - save/load
 
 // Intressant uppdelning 
 //   => http://i.imgur.com/PCKu0ip.png
