@@ -1420,20 +1420,7 @@ struct State {
     virtual void render() = 0;
 };
 
-struct StateNames {
-    int MAIN_MENU = 0;
-    int PLAYER_TURN = 1;
-    int ENEMY_TURN = 2;
-    int PLAYER_DEAD = 3;
-    int SHOW_INVENTORY = 4;
-    int TARGETING = 5;
-    int LEVEL_UP = 6;
-    int CHARACTER_SCREEN = 7;
-    
-} state_names;
-
-int current_state = 0;
-std::unordered_map<int, State*> states;
+std::unordered_map<GameState, State*> states;
 
 ///
 
@@ -1546,7 +1533,9 @@ struct PlayerTurn : State {
         }
     };
 
-    void render() override {};
+    void render() override {
+        render_game();
+    };
 };
 
 struct EnemyTurn : State {
@@ -1560,7 +1549,9 @@ struct EnemyTurn : State {
 
         game_state = PLAYER_TURN;
     };
-    void render() override {};
+    void render() override {
+        render_game();
+    };
 };
     
 struct PlayerDead : State {
@@ -1572,7 +1563,9 @@ struct PlayerDead : State {
             engine_exit();
         }
     };
-    void render() override {};
+    void render() override {
+        render_game();
+    };
 };
 struct InventoryState : State {
     void update() override {
@@ -1608,6 +1601,7 @@ struct InventoryState : State {
             }
     };
     void render() override {
+        render_game();
         gui_render_inventory(root_console, "Press the key next to an item to use it (hold alt to drop), or Esc to cancel.\n", player, 50, SCREEN_WIDTH, SCREEN_HEIGHT);
     };
 };
@@ -1627,7 +1621,9 @@ struct TargetingState : State {
                 events_queue({ EventType::Message, NULL, "Targeting cancelled", TCOD_yellow });   
             }
     };
-    void render() override {};
+    void render() override {
+        render_game();
+    };
 };
 struct LevelUpState : State {
     void update() override {
@@ -1645,6 +1641,7 @@ struct LevelUpState : State {
             }
     };
     void render() override {
+        render_game();
         gui_render_level_up_menu(root_console, "Level up! Choose a stat to raise:", player, 40, SCREEN_WIDTH, SCREEN_HEIGHT);
     };
 };
@@ -1655,6 +1652,7 @@ struct CharacterScreenState : State {
         }
     };
     void render() override {
+        render_game();
         gui_render_character_screen(root_console, player, 30, 10, SCREEN_WIDTH, SCREEN_HEIGHT);
     };
 };
@@ -1668,35 +1666,35 @@ int main( int argc, char *argv[] ) {
     root_console = TCODConsole::root;
     bar = new TCODConsole(SCREEN_WIDTH, Panel_height);
 
-    states.insert({ state_names.MAIN_MENU, new MainMenu() });
-    states.insert({ state_names.PLAYER_TURN, new PlayerTurn() });
-    states.insert({ state_names.ENEMY_TURN, new EnemyTurn() });
-    states.insert({ state_names.PLAYER_DEAD, new PlayerDead() });
-    states.insert({ state_names.SHOW_INVENTORY , new InventoryState() });
-    states.insert({ state_names.TARGETING, new TargetingState() });
-    states.insert({ state_names.LEVEL_UP, new LevelUpState() });
-    states.insert({ state_names.CHARACTER_SCREEN, new CharacterScreenState() });
+    states.insert({ MAIN_MENU, new MainMenu() });
+    states.insert({ PLAYER_TURN, new PlayerTurn() });
+    states.insert({ ENEMY_TURN, new EnemyTurn() });
+    states.insert({ PLAYER_DEAD, new PlayerDead() });
+    states.insert({ SHOW_INVENTORY , new InventoryState() });
+    states.insert({ TARGETING, new TargetingState() });
+    states.insert({ LEVEL_UP, new LevelUpState() });
+    states.insert({ CHARACTER_SCREEN, new CharacterScreenState() });
 
     while ( !TCODConsole::isWindowClosed() && engine_running ) {
         input_update();
         
         //// UPDATE
-        
-        if(game_state == PLAYER_TURN) {    
-            states[state_names.PLAYER_TURN]->update();
-        } else if(game_state == PLAYER_DEAD) {
-            states[state_names.PLAYER_DEAD]->update();
-        } else if(game_state == SHOW_INVENTORY) {
-            states[state_names.SHOW_INVENTORY]->update();
-        } else if(game_state == TARGETING) {
-            states[state_names.TARGETING]->update();
-        } else if(game_state == MAIN_MENU) {
-            states[state_names.MAIN_MENU]->update();
-        } else if(game_state == LEVEL_UP) {
-            states[state_names.LEVEL_UP]->update();
-        } else if(game_state == ENEMY_TURN) {
-            states[state_names.ENEMY_TURN]->update();
-        } 
+        states[game_state]->update();
+        // if(game_state == PLAYER_TURN) {    
+        //     states[state_names.PLAYER_TURN]->update();
+        // } else if(game_state == PLAYER_DEAD) {
+        //     states[state_names.PLAYER_DEAD]->update();
+        // } else if(game_state == SHOW_INVENTORY) {
+        //     states[state_names.SHOW_INVENTORY]->update();
+        // } else if(game_state == TARGETING) {
+        //     states[state_names.TARGETING]->update();
+        // } else if(game_state == MAIN_MENU) {
+        //     states[state_names.MAIN_MENU]->update();
+        // } else if(game_state == LEVEL_UP) {
+        //     states[state_names.LEVEL_UP]->update();
+        // } else if(game_state == ENEMY_TURN) {
+        //     states[state_names.ENEMY_TURN]->update();
+        // } 
 
         // EVENTS
         for(auto &e : _event_queue) {
@@ -1783,19 +1781,7 @@ int main( int argc, char *argv[] ) {
         root_console->setDefaultForeground(TCODColor::white);
         root_console->clear();
 
-        if(game_state != MAIN_MENU) {
-            render_game();
-        } else {
-            states[state_names.MAIN_MENU]->render();
-        }
-        
-        if(game_state == SHOW_INVENTORY) {
-            states[state_names.SHOW_INVENTORY]->render();
-        } else if(game_state == LEVEL_UP) {
-            states[state_names.LEVEL_UP]->render();
-        } else if(game_state == CHARACTER_SCREEN) {
-            states[state_names.CHARACTER_SCREEN]->render();
-        }
+        states[game_state]->render();
 
         TCODConsole::flush();
     }
