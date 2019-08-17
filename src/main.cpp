@@ -10,9 +10,6 @@
 // http://rogueliketutorials.com/tutorials/tcod/part-13/
 // http://www.roguebasin.com/index.php?title=Complete_roguelike_tutorial_using_C%2B%2B_and_libtcod_-_part_10.1:_persistence
 
-WE ARE AT
-"We need do adjust the way we get the values from Fighter. It’d be better if the max_hp, power, and "
-
 
 // Skipped things:
 // - A* movement for monsters (Part 6)
@@ -415,14 +412,29 @@ struct Inventory {
 struct Fighter {
     int hp;
     int hp_max;
-    int defense;
-    int power;
+    int defense_max;
+    int power_max;
     int xp;
     Entity *_owner;
     
     Fighter(Entity* owner, int hp_, int defense_, int power_, int xp = 0) 
-        : hp(hp_), hp_max(hp_), defense(defense_), power(power_), _owner(owner), xp(xp) {}
+        : hp(hp_), hp_max(hp_), defense_max(defense_), power_max(power_), _owner(owner), xp(xp) {}
 
+    int max_hp() {
+        int bonus = _owner && _owner->equipment ? _owner->equipment->max_hp_bonus() : 0;
+        return hp_max + bonus;
+    }
+
+    int power() {
+        int bonus = _owner && _owner->equipment ? _owner->equipment->power_bonus() : 0;
+        return power_max + bonus;
+    }
+
+    int defense() {
+        int bonus = _owner && _owner->equipment ? _owner->equipment->defense_bonus() : 0;
+        return defense_max + bonus;
+    }
+    
     void take_damage(int amount) {
         hp -= amount;
 
@@ -433,7 +445,7 @@ struct Fighter {
     }
 
     void attack(Entity *entity) {
-        int damage = power - entity->fighter->defense;
+        int damage = power() - entity->fighter->defense();
 
         if(damage > 0) {
             // VERY SHITTY STRING ALLOCATION
@@ -799,6 +811,14 @@ std::vector<ItemBlueprint> item_data = {
     { 
         { { 10, 2 } },
         3, "Lightning Scroll", '#', TCOD_violet
+    },
+    { 
+        { { 5, 4 } },
+        4, "Sword", '/', TCOD_sky
+    },
+    { 
+        { { 15, 8 } },
+        5, "Shield", '[', TCOD_darker_orange
     }
 };
 void map_add_items(GameMap &map) {
@@ -824,6 +844,9 @@ void map_add_items(GameMap &map) {
 
             // We probably want some other way of generating the item etc
             // so this will change in the future anyway
+
+            // Also perhaps split items into different categories
+            // so we can select a random category or a set number from each category
             std::vector<int> chances;
             chances.reserve(item_data.size());
             for(auto id : item_data) {
@@ -854,6 +877,10 @@ void map_add_items(GameMap &map) {
             } else if(item.id == 3) {
                 e->item->args = { 40, 5 };
                 e->item->on_use = cast_lightning_bolt;
+            } else if(item.id == 4) {
+                e->equippable = new Equippable(MAIN_HAND, 3, 0, 0);
+            } else if(item.id == 5) {
+                e->equippable = new Equippable(OFF_HAND, 0, 1, 0);
             } else {
                 delete e->item;
                 delete e;
@@ -1031,13 +1058,19 @@ void gui_render_menu(TCODConsole *con, std::string header, const std::vector<std
     TCODConsole::blit(menu, 0, 0, width, height, con, x, y, 1.0, 0.7);
 }
 
-void gui_render_inventory(TCODConsole *con, const std::string header, const Inventory &inventory, int inventory_width, int screen_width, int screen_height) {
+void gui_render_inventory(TCODConsole *con, const std::string header, const Entity *player, int inventory_width, int screen_width, int screen_height) {
     std::vector<std::string> options;
-    if(inventory.items.size() == 0) {
+    if(player->inventory->items.size() == 0) {
         options.push_back("Inventory is empty.");
     } else {
-        for(auto &item : inventory.items) {
-            options.push_back(item->item->name);
+        for(auto item : player->inventory->items) {
+            if(player->equipment->main_hand == item) {
+                options.push_back(item->item->name + " (in main hand)");
+            } else if(player->equipment->off_hand == item) {
+                options.push_back(item->item->name + " (in off hand)");
+            } else {
+                options.push_back(item->item->name);
+            }
         }
     } 
 
@@ -1061,9 +1094,9 @@ void gui_render_main_menu(TCODConsole *con, int screen_width, int screen_height)
 
 void gui_render_level_up_menu(TCODConsole *con, std::string header, Entity *player, int menu_width, int screen_width, int screen_height) {
     std::vector<std::string> options = {
-        "Constitution | +20 HP, current: " + std::to_string(player->fighter->hp),
-        "Strength | +1 attack, current: " + std::to_string(player->fighter->power),
-        "Agility | +1 defense, current: " + std::to_string(player->fighter->defense)
+        "Constitution | +20 HP, current: " + std::to_string(player->fighter->hp_max),
+        "Strength | +1 attack, current: " + std::to_string(player->fighter->power_max),
+        "Agility | +1 defense, current: " + std::to_string(player->fighter->defense_max)
     };
 
     gui_render_menu(con, header, options, menu_width, screen_width, screen_height);
@@ -1091,9 +1124,9 @@ void gui_render_character_screen(TCODConsole *con, Entity *player, int character
     character_screen->printRectEx(0, 6, character_screen_width, character_screen_height, TCOD_BKGND_NONE, TCOD_LEFT,
         "Maximum HP: %d", player->fighter->hp_max);
     character_screen->printRectEx(0, 7, character_screen_width, character_screen_height, TCOD_BKGND_NONE, TCOD_LEFT,
-        "Attack: %d", player->fighter->power);
+        "Attack: %d", player->fighter->power());
     character_screen->printRectEx(0, 8, character_screen_width, character_screen_height, TCOD_BKGND_NONE, TCOD_LEFT,
-        "Defense: %d", player->fighter->defense);
+        "Defense: %d", player->fighter->defense());
 
     int x = screen_width / 2 - character_screen_width / 2;
     int y = screen_height / 2 - character_screen_height / 2;
@@ -1113,10 +1146,19 @@ void new_game() {
     _entities.push_back(new Entity(SCREEN_WIDTH/2, SCREEN_HEIGHT/2, '@', TCODColor::white, "Player", true, render_priority.ENTITY));
     
     player = _entities[0];
-    player->fighter = new Fighter(player, 100, 1, 4);
+    player->fighter = new Fighter(player, 100, 1, 2);
     player->inventory = new Inventory(player, 26);
     player->level = new Level();
     player->equipment = new Equipment();
+
+    Entity *e;
+    e = new Entity(0, 0, '-', TCOD_sky, "Dagger", false, render_priority.ITEM);
+    e->item = new Item();
+    e->item->name = "Dagger";
+    e->equippable = new Equippable(MAIN_HAND, 2, 0, 0);
+    
+    player->inventory->add_item(e);
+    player->equipment->toggle_equipment(e);
 
     // generate map and fov
     game_map.tcod_fov_map = new TCODMap(Map_Width, Map_Height);
@@ -1328,10 +1370,10 @@ int main( int argc, char *argv[] ) {
                 player->fighter->hp += 20;
                 game_state = previous_game_state;
             } else if(key_char == 'b') {
-                player->fighter->power += 1;
+                player->fighter->power_max += 1;
                 game_state = previous_game_state;
             } else if(key_char == 'c') {
-                player->fighter->defense += 1;
+                player->fighter->defense_max += 1;
                 game_state = previous_game_state;
             }
         } else if(key.vk == TCODK_ESCAPE) {
@@ -1527,7 +1569,7 @@ int main( int argc, char *argv[] ) {
         }
         
         if(game_state == SHOW_INVENTORY) {
-            gui_render_inventory(root_console, "Press the key next to an item to use it (hold alt to drop), or Esc to cancel.\n", *player->inventory, 50, SCREEN_WIDTH, SCREEN_HEIGHT);
+            gui_render_inventory(root_console, "Press the key next to an item to use it (hold alt to drop), or Esc to cancel.\n", player, 50, SCREEN_WIDTH, SCREEN_HEIGHT);
         } else if(game_state == LEVEL_UP) {
             gui_render_level_up_menu(root_console, "Level up! Choose a stat to raise:", player, 40, SCREEN_WIDTH, SCREEN_HEIGHT);
         } else if(game_state == CHARACTER_SCREEN) {
