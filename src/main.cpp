@@ -1368,49 +1368,48 @@ void next_floor(GameMap &map) {
 }
 
 void render_game() {
+    for(int y = 0; y < Map_Height; y++) {
+        for(int x = 0; x < Map_Width; x++) {
+            if (game_map.tcod_fov_map->isInFov(x, y)) {
+                game_map.tiles[map_index(x, y)].explored = true;
+
+                root_console->setCharBackground(x, y,
+                    game_map.tiles[map_index(x, y)].block_sight ? color_table.light_wall : color_table.light_ground );
+            } else if ( game_map.tiles[map_index(x, y)].explored ) {
+                root_console->setCharBackground(x,y,
+                    game_map.tiles[map_index(x, y)].block_sight ? color_table.dark_wall : color_table.dark_ground );
+            }
+        }
+    }
+
+    std::sort(_entities.begin(), _entities.end(), entity_render_sort);
+
+    for(int i = 0; i < _entities.size(); i++) {
+        const auto entity = _entities[i];
+        if((entity->stairs && game_map.tiles[map_index(entity->x, entity->y)].explored) 
+            || game_map.tcod_fov_map->isInFov(entity->x, entity->y)) {
+            root_console->setDefaultForeground(entity->color);
+            root_console->putChar(entity->x, entity->y, entity->gfx);
+        }
+    }
     
-            for(int y = 0; y < Map_Height; y++) {
-                for(int x = 0; x < Map_Width; x++) {
-                    if (game_map.tcod_fov_map->isInFov(x, y)) {
-                        game_map.tiles[map_index(x, y)].explored = true;
+    bar->setDefaultBackground(TCODColor::black);
+    bar->clear();
+    gui_render_bar(bar, 1, 1, Bar_width, "HP", player->fighter->hp, player->fighter->hp_max, TCOD_light_red, TCOD_darker_red);
+    gui_render_mouse_look(bar, game_map, mouse.cx, mouse.cy);
+    bar->printEx(1, 3, TCOD_BKGND_NONE, TCOD_LEFT, "Dungeon level: %d", game_map.level);
+    
+    float colorCoef = 0.4f;
+    for(int i = 0, y = 1; i < gui_log.size(); i++, y++) {
+        bar->setDefaultForeground(gui_log[i]->color * colorCoef);
+        bar->print(Log_x, y, gui_log[i]->text);
+        // could one-line this with a clamp;
+        if (colorCoef < 1.0f ) {
+            colorCoef += 0.3f;
+        }
+    }
 
-                        root_console->setCharBackground(x, y,
-                            game_map.tiles[map_index(x, y)].block_sight ? color_table.light_wall : color_table.light_ground );
-                    } else if ( game_map.tiles[map_index(x, y)].explored ) {
-                        root_console->setCharBackground(x,y,
-                            game_map.tiles[map_index(x, y)].block_sight ? color_table.dark_wall : color_table.dark_ground );
-                    }
-                }
-            }
-
-            std::sort(_entities.begin(), _entities.end(), entity_render_sort);
-
-            for(int i = 0; i < _entities.size(); i++) {
-                const auto entity = _entities[i];
-                if((entity->stairs && game_map.tiles[map_index(entity->x, entity->y)].explored) 
-                    || game_map.tcod_fov_map->isInFov(entity->x, entity->y)) {
-                    root_console->setDefaultForeground(entity->color);
-                    root_console->putChar(entity->x, entity->y, entity->gfx);
-                }
-            }
-        
-            bar->setDefaultBackground(TCODColor::black);
-            bar->clear();
-            gui_render_bar(bar, 1, 1, Bar_width, "HP", player->fighter->hp, player->fighter->hp_max, TCOD_light_red, TCOD_darker_red);
-            gui_render_mouse_look(bar, game_map, mouse.cx, mouse.cy);
-            bar->printEx(1, 3, TCOD_BKGND_NONE, TCOD_LEFT, "Dungeon level: %d", game_map.level);
-            
-            float colorCoef = 0.4f;
-            for(int i = 0, y = 1; i < gui_log.size(); i++, y++) {
-                bar->setDefaultForeground(gui_log[i]->color * colorCoef);
-                bar->print(Log_x, y, gui_log[i]->text);
-                // could one-line this with a clamp;
-                if (colorCoef < 1.0f ) {
-                    colorCoef += 0.3f;
-                }
-            }
-
-            TCODConsole::blit(bar, 0, 0, SCREEN_WIDTH, Panel_height, root_console, 0, Panel_y);
+    TCODConsole::blit(bar, 0, 0, SCREEN_WIDTH, Panel_height, root_console, 0, Panel_y);
 }
 
 
@@ -1447,7 +1446,7 @@ struct MainMenu : State {
     };
 };
 
-struct PlayerTurn : State {
+struct GamePlay : State {
     void update() override {
         if(input_key_pressed(TCODK_ESCAPE)) {
             engine_exit();
@@ -1455,105 +1454,99 @@ struct PlayerTurn : State {
             TCODConsole::setFullscreen(!TCODConsole::isFullscreen());
         }
 
-        Movement m = { 0, 0 };
-        bool pickup = false;
-        bool take_stairs = false;
-        if(key.vk == TCODK_UP) {
-            m.y = -1;
-        } else if(key.vk == TCODK_DOWN) {
-            m.y = 1;
-        } else if(key.vk == TCODK_LEFT) {
-            m.x = -1;
-        } else if(key.vk == TCODK_RIGHT) {
-            m.x = 1;
-        } else if(key.c == 'r') {
-            m.x = 1;
-            m.y = -1;
-        } else if(key.c == 'e') {
-            m.x = -1;
-            m.y = -1;
-        } else if(key.c == 'd') {
-            m.x = -1;
-            m.y = 1;
-        } else if(key.c == 'f') {
-            m.x = 1;
-            m.y = 1;
-        } else if(key.c == 'z') {
-            game_state = ENEMY_TURN;
-        } else if(key.c == 'g') {
-            pickup = true;
-        } else if(key.c == 'i') {
-            previous_game_state = game_state;
-            game_state = SHOW_INVENTORY;
-        } else if(key.c == 'c') {
-            previous_game_state = game_state;
-            game_state = CHARACTER_SCREEN;
-        } else if(key.vk == TCODK_ENTER) {
-            take_stairs = true;
-        }
-
-        int dx = player->x + m.x, dy = player->y + m.y; 
-        if((m.x != 0 || m.y != 0) && !map_blocked(game_map, dx, dy)) {
-            EntityFat *target;
-            if(entity_blocking_at(dx, dy, &target)) {
-                player->fighter->attack(target);
-            } else {
-                player->x = dx;
-                player->y = dy;
-                game_map.tcod_fov_map->computeFov(player->x, player->y, fov_radius, fov_light_walls, fov_algorithm);
+        if(game_state == PLAYER_TURN) {
+            Movement m = { 0, 0 };
+            bool pickup = false;
+            bool take_stairs = false;
+            if(key.vk == TCODK_UP) {
+                m.y = -1;
+            } else if(key.vk == TCODK_DOWN) {
+                m.y = 1;
+            } else if(key.vk == TCODK_LEFT) {
+                m.x = -1;
+            } else if(key.vk == TCODK_RIGHT) {
+                m.x = 1;
+            } else if(key.c == 'r') {
+                m.x = 1;
+                m.y = -1;
+            } else if(key.c == 'e') {
+                m.x = -1;
+                m.y = -1;
+            } else if(key.c == 'd') {
+                m.x = -1;
+                m.y = 1;
+            } else if(key.c == 'f') {
+                m.x = 1;
+                m.y = 1;
+            } else if(key.c == 'z') {
+                game_state = ENEMY_TURN;
+            } else if(key.c == 'g') {
+                pickup = true;
+            } else if(key.c == 'i') {
+                previous_game_state = game_state;
+                game_state = SHOW_INVENTORY;
+            } else if(key.c == 'c') {
+                previous_game_state = game_state;
+                game_state = CHARACTER_SCREEN;
+            } else if(key.vk == TCODK_ENTER) {
+                take_stairs = true;
             }
 
-            game_state = ENEMY_TURN;
-        } else if(pickup) {
-            for(int i = 0; i < _entities.size(); i++) {
-                auto entity = _entities[i];
-                if(player->x == entity->x && player->y == entity->y && entity->item) {
-                    events_queue({ EventType::ItemPickup, entity });
-                    game_state = ENEMY_TURN;
-                    pickup = false;
-                    break;  
+            int dx = player->x + m.x, dy = player->y + m.y; 
+            if((m.x != 0 || m.y != 0) && !map_blocked(game_map, dx, dy)) {
+                EntityFat *target;
+                if(entity_blocking_at(dx, dy, &target)) {
+                    player->fighter->attack(target);
+                } else {
+                    player->x = dx;
+                    player->y = dy;
+                    game_map.tcod_fov_map->computeFov(player->x, player->y, fov_radius, fov_light_walls, fov_algorithm);
+                }
+
+                game_state = ENEMY_TURN;
+            } else if(pickup) {
+                for(int i = 0; i < _entities.size(); i++) {
+                    auto entity = _entities[i];
+                    if(player->x == entity->x && player->y == entity->y && entity->item) {
+                        events_queue({ EventType::ItemPickup, entity });
+                        game_state = ENEMY_TURN;
+                        pickup = false;
+                        break;  
+                    }
+                }
+                // if we still want to pickup after we checked entities there is nothing to pickup
+                if(pickup) {
+                    events_queue({ EventType::Message, NULL, "There is nothing here to pick up.", TCOD_yellow });
+                }
+            } else if(take_stairs) {
+                for(int i = 0; i < _entities.size(); i++) {
+                    auto entity = _entities[i];
+                    if(player->x == entity->x && player->y == entity->y && entity->stairs) {
+                        events_queue({ EventType::NextFloor, entity });
+                        take_stairs = false;
+                        break;  
+                    }
                 }
             }
-            // if we still want to pickup after we checked entities there is nothing to pickup
-            if(pickup) {
-                events_queue({ EventType::Message, NULL, "There is nothing here to pick up.", TCOD_yellow });
+            if(take_stairs) {
+                events_queue({ EventType::Message, NULL, "There are no stairs here.", TCOD_yellow });
             }
-        } else if(take_stairs) {
-            for(int i = 0; i < _entities.size(); i++) {
-                auto entity = _entities[i];
-                if(player->x == entity->x && player->y == entity->y && entity->stairs) {
-                    events_queue({ EventType::NextFloor, entity });
-                    take_stairs = false;
-                    break;  
+        } else {
+            for(int i = 1; i < _entities.size(); i++) {
+                const auto entity = _entities[i];
+                if(!entity->marked_for_deletion && entity->ai) {
+                    entity->ai->take_turn(player, game_map);
                 }
             }
+            game_state = PLAYER_TURN;
         }
-        if(take_stairs) {
-            events_queue({ EventType::Message, NULL, "There are no stairs here.", TCOD_yellow });
-        }
-    };
+    }
 
     void render() override {
         render_game();
-    };
+    }
 };
 
-struct EnemyTurn : State {
-    void update() override {
-        for(int i = 1; i < _entities.size(); i++) {
-             const auto entity = _entities[i];
-             if(!entity->marked_for_deletion && entity->ai) {
-                 entity->ai->take_turn(player, game_map);
-             }
-         }
-
-        game_state = PLAYER_TURN;
-    };
-    void render() override {
-        render_game();
-    };
-};
-    
 struct PlayerDead : State {
     void update() override {
         if(input_key_pressed('i')) {
@@ -1563,6 +1556,7 @@ struct PlayerDead : State {
             engine_exit();
         }
     };
+
     void render() override {
         render_game();
     };
@@ -1570,36 +1564,37 @@ struct PlayerDead : State {
 struct InventoryState : State {
     void update() override {
         int index = (int)key.c - (int)'a';
-            if(index >= 0 && previous_game_state != PLAYER_DEAD && index < player->inventory->items.size()) {
-                if(key.lalt) {
-                    // DROP ITEM
-                    auto item_entity = player->inventory->items[index];
-                    item_entity->x = player->x;
-                    item_entity->y = player->y;
-                    _entities.push_back(item_entity);
-                    player->inventory->remove(item_entity);
-                    if(player->equipment->main_hand == item_entity || player->equipment->off_hand == item_entity) {
-                        player->equipment->toggle_equipment(item_entity);
-                    }
-                    game_state = ENEMY_TURN;
+        if(index >= 0 && previous_game_state != PLAYER_DEAD && index < player->inventory->items.size()) {
+            if(key.lalt) {
+                // DROP ITEM
+                auto item_entity = player->inventory->items[index];
+                item_entity->x = player->x;
+                item_entity->y = player->y;
+                _entities.push_back(item_entity);
+                player->inventory->remove(item_entity);
+                if(player->equipment->main_hand == item_entity || player->equipment->off_hand == item_entity) {
+                    player->equipment->toggle_equipment(item_entity);
+                }
+                game_state = ENEMY_TURN;
+            } else {
+                if(player->inventory->requires_target(index)) {
+                    targeting_item = player->inventory->items[index];
+                    previous_game_state = PLAYER_TURN;
+                    game_state = TARGETING;
+                    events_queue({ EventType::Message, NULL, targeting_item->item->targeting_message, TCOD_yellow });   
                 } else {
-                    if(player->inventory->requires_target(index)) {
-                        targeting_item = player->inventory->items[index];
-                        previous_game_state = PLAYER_TURN;
-                        game_state = TARGETING;
-                        events_queue({ EventType::Message, NULL, targeting_item->item->targeting_message, TCOD_yellow });   
-                    } else {
-                        Context context = Context(_entities, game_map);
-                        bool consumed = player->inventory->use(index, context);
-                        game_state = ENEMY_TURN;
-                    }
+                    Context context = Context(_entities, game_map);
+                    bool consumed = player->inventory->use(index, context);
+                    game_state = ENEMY_TURN;
                 }
             }
-            
-            if(key.vk == TCODK_ESCAPE) {
-                game_state = previous_game_state;
-            }
+        }
+        
+        if(key.vk == TCODK_ESCAPE) {
+            game_state = previous_game_state;
+        }
     };
+
     void render() override {
         render_game();
         gui_render_inventory(root_console, "Press the key next to an item to use it (hold alt to drop), or Esc to cancel.\n", player, 50, SCREEN_WIDTH, SCREEN_HEIGHT);
@@ -1608,19 +1603,20 @@ struct InventoryState : State {
 struct TargetingState : State {
     void update() override {
         int x = mouse.cx, y = mouse.cy;            
-            if(mouse.lbutton_pressed) {
-                //targeting_item->item->args.target_x
-                targeting_item->item->args.target_x = x;
-                targeting_item->item->args.target_y = y;
-                Context context = Context(_entities, game_map);
-                if(player->inventory->use(targeting_item, context)) {
-                    game_state = ENEMY_TURN;
-                }
-            } else if(key.vk == TCODK_ESCAPE || mouse.rbutton_pressed) {
-                game_state = previous_game_state;
-                events_queue({ EventType::Message, NULL, "Targeting cancelled", TCOD_yellow });   
+        if(mouse.lbutton_pressed) {
+            //targeting_item->item->args.target_x
+            targeting_item->item->args.target_x = x;
+            targeting_item->item->args.target_y = y;
+            Context context = Context(_entities, game_map);
+            if(player->inventory->use(targeting_item, context)) {
+                game_state = ENEMY_TURN;
             }
+        } else if(key.vk == TCODK_ESCAPE || mouse.rbutton_pressed) {
+            game_state = previous_game_state;
+            events_queue({ EventType::Message, NULL, "Targeting cancelled", TCOD_yellow });   
+        }
     };
+
     void render() override {
         render_game();
     };
@@ -1628,18 +1624,19 @@ struct TargetingState : State {
 struct LevelUpState : State {
     void update() override {
         char key_char = key.c;
-            if(key_char == 'a') {
-                player->fighter->hp_max += 20;
-                player->fighter->hp += 20;
-                game_state = previous_game_state;
-            } else if(key_char == 'b') {
-                player->fighter->power_max += 1;
-                game_state = previous_game_state;
-            } else if(key_char == 'c') {
-                player->fighter->defense_max += 1;
-                game_state = previous_game_state;
-            }
+        if(key_char == 'a') {
+            player->fighter->hp_max += 20;
+            player->fighter->hp += 20;
+            game_state = previous_game_state;
+        } else if(key_char == 'b') {
+            player->fighter->power_max += 1;
+            game_state = previous_game_state;
+        } else if(key_char == 'c') {
+            player->fighter->defense_max += 1;
+            game_state = previous_game_state;
+        }
     };
+
     void render() override {
         render_game();
         gui_render_level_up_menu(root_console, "Level up! Choose a stat to raise:", player, 40, SCREEN_WIDTH, SCREEN_HEIGHT);
@@ -1651,6 +1648,7 @@ struct CharacterScreenState : State {
             game_state = previous_game_state;
         }
     };
+    
     void render() override {
         render_game();
         gui_render_character_screen(root_console, player, 30, 10, SCREEN_WIDTH, SCREEN_HEIGHT);
@@ -1667,8 +1665,9 @@ int main( int argc, char *argv[] ) {
     bar = new TCODConsole(SCREEN_WIDTH, Panel_height);
 
     states.insert({ MAIN_MENU, new MainMenu() });
-    states.insert({ PLAYER_TURN, new PlayerTurn() });
-    states.insert({ ENEMY_TURN, new EnemyTurn() });
+    auto game_play = new GamePlay();
+    states.insert({ PLAYER_TURN, game_play });
+    states.insert({ ENEMY_TURN, game_play });
     states.insert({ PLAYER_DEAD, new PlayerDead() });
     states.insert({ SHOW_INVENTORY , new InventoryState() });
     states.insert({ TARGETING, new TargetingState() });
@@ -1680,28 +1679,12 @@ int main( int argc, char *argv[] ) {
         
         //// UPDATE
         states[game_state]->update();
-        // if(game_state == PLAYER_TURN) {    
-        //     states[state_names.PLAYER_TURN]->update();
-        // } else if(game_state == PLAYER_DEAD) {
-        //     states[state_names.PLAYER_DEAD]->update();
-        // } else if(game_state == SHOW_INVENTORY) {
-        //     states[state_names.SHOW_INVENTORY]->update();
-        // } else if(game_state == TARGETING) {
-        //     states[state_names.TARGETING]->update();
-        // } else if(game_state == MAIN_MENU) {
-        //     states[state_names.MAIN_MENU]->update();
-        // } else if(game_state == LEVEL_UP) {
-        //     states[state_names.LEVEL_UP]->update();
-        // } else if(game_state == ENEMY_TURN) {
-        //     states[state_names.ENEMY_TURN]->update();
-        // } 
-
+        
         // EVENTS
         for(auto &e : _event_queue) {
             switch(e.type) {
                 case EventType::Message: {
                     gui_log_message(e.color, e.message.c_str());
-                    //printf("|| %s \n", e.message.c_str());
                     break;
                 }
                 case EventType::EntityDead: {
