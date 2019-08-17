@@ -1391,7 +1391,11 @@ struct MainMenu : State {
             new_game();
         } else if(index == 1) {
             engine_log(LogStatus::Information, "Continue is not implemented (only show if available)");
-        } else if(index == 2 || input_key_pressed(TCODK_ESCAPE)) {
+        } else if(index == 2) {
+            engine_exit();
+        }
+        
+        if(input_key_pressed(TCODK_ESCAPE)) {
             engine_exit();
         } else if(input_key_pressed(TCODK_ENTER) && input_lalt()) {
             TCODConsole::setFullscreen(!TCODConsole::isFullscreen());
@@ -1403,9 +1407,90 @@ struct MainMenu : State {
     };
 };
 
-struct GamePlay : State {
+struct PlayerTurn : State {
     void update() override {
+        if(input_key_pressed(TCODK_ESCAPE)) {
+            engine_exit();
+        } else if(input_key_pressed(TCODK_ENTER) && input_lalt()) {
+            TCODConsole::setFullscreen(!TCODConsole::isFullscreen());
+        }
 
+        Movement m = { 0, 0 };
+        bool pickup = false;
+        bool take_stairs = false;
+        if(key.vk == TCODK_UP) {
+            m.y = -1;
+        } else if(key.vk == TCODK_DOWN) {
+            m.y = 1;
+        } else if(key.vk == TCODK_LEFT) {
+            m.x = -1;
+        } else if(key.vk == TCODK_RIGHT) {
+            m.x = 1;
+        } else if(key.c == 'r') {
+            m.x = 1;
+            m.y = -1;
+        } else if(key.c == 'e') {
+            m.x = -1;
+            m.y = -1;
+        } else if(key.c == 'd') {
+            m.x = -1;
+            m.y = 1;
+        } else if(key.c == 'f') {
+            m.x = 1;
+            m.y = 1;
+        } else if(key.c == 'z') {
+            game_state = ENEMY_TURN;
+        } else if(key.c == 'g') {
+            pickup = true;
+        } else if(key.c == 'i') {
+            previous_game_state = game_state;
+            game_state = SHOW_INVENTORY;
+        } else if(key.c == 'c') {
+            previous_game_state = game_state;
+            game_state = CHARACTER_SCREEN;
+        } else if(key.vk == TCODK_ENTER) {
+            take_stairs = true;
+        }
+
+        int dx = player->x + m.x, dy = player->y + m.y; 
+        if((m.x != 0 || m.y != 0) && !map_blocked(game_map, dx, dy)) {
+            EntityFat *target;
+            if(entity_blocking_at(dx, dy, &target)) {
+                player->fighter->attack(target);
+            } else {
+                player->x = dx;
+                player->y = dy;
+                game_map.tcod_fov_map->computeFov(player->x, player->y, fov_radius, fov_light_walls, fov_algorithm);
+            }
+
+            game_state = ENEMY_TURN;
+        } else if(pickup) {
+            for(int i = 0; i < _entities.size(); i++) {
+                auto entity = _entities[i];
+                if(player->x == entity->x && player->y == entity->y && entity->item) {
+                    events_queue({ EventType::ItemPickup, entity });
+                    game_state = ENEMY_TURN;
+                    pickup = false;
+                    break;  
+                }
+            }
+            // if we still want to pickup after we checked entities there is nothing to pickup
+            if(pickup) {
+                events_queue({ EventType::Message, NULL, "There is nothing here to pick up.", TCOD_yellow });
+            }
+        } else if(take_stairs) {
+            for(int i = 0; i < _entities.size(); i++) {
+                auto entity = _entities[i];
+                if(player->x == entity->x && player->y == entity->y && entity->stairs) {
+                    events_queue({ EventType::NextFloor, entity });
+                    take_stairs = false;
+                    break;  
+                }
+            }
+        }
+        if(take_stairs) {
+            events_queue({ EventType::Message, NULL, "There are no stairs here.", TCOD_yellow });
+        }
     };
 
     void render() override {
@@ -1422,65 +1507,21 @@ int main( int argc, char *argv[] ) {
     auto bar = new TCODConsole(SCREEN_WIDTH, Panel_height);
 
     states.insert({ state_names.MAIN_MENU, new MainMenu() });
+    states.insert({ state_names.PLAYER_TURN, new PlayerTurn() });
 
     while ( !TCODConsole::isWindowClosed() && engine_running ) {
         input_update();
-
+        
         //// INPUT
         
-        Movement m = { 0, 0 };
-        bool pickup = false;
-        bool take_stairs = false;
         if(game_state == PLAYER_TURN) {    
-            if(key.vk == TCODK_UP) {
-                m.y = -1;
-            } else if(key.vk == TCODK_DOWN) {
-                m.y = 1;
-            } else if(key.vk == TCODK_LEFT) {
-                m.x = -1;
-            } else if(key.vk == TCODK_RIGHT) {
-                m.x = 1;
-            } else if(key.c == 'r') {
-                m.x = 1;
-                m.y = -1;
-            } else if(key.c == 'e') {
-                m.x = -1;
-                m.y = -1;
-            } else if(key.c == 'd') {
-                m.x = -1;
-                m.y = 1;
-            } else if(key.c == 'f') {
-                m.x = 1;
-                m.y = 1;
-            } else if(key.c == 'z') {
-                game_state = ENEMY_TURN;
-            } else if(key.c == 'g') {
-                pickup = true;
-            } else if(key.c == 'i') {
-                previous_game_state = game_state;
-                game_state = SHOW_INVENTORY;
-            } else if(key.c == 'c') {
-                previous_game_state = game_state;
-                game_state = CHARACTER_SCREEN;
-            } else if(key.vk == TCODK_ENTER) {
-                take_stairs = true;
-            } else if(key.vk == TCODK_ESCAPE) {
-                return 0;
-            } else if(key.vk == TCODK_ENTER) {
-                if(key.lalt) {
-                    TCODConsole::setFullscreen(!TCODConsole::isFullscreen());
-                }
-            }
+            states[state_names.PLAYER_TURN]->update();
         } else if(game_state == PLAYER_DEAD) {
             if(key.c == 'i') {
                 previous_game_state = game_state;
                 game_state = SHOW_INVENTORY;
             } else if(key.vk == TCODK_ESCAPE) {
-                return 0;
-            } else if(key.vk == TCODK_ENTER) {
-                if(key.lalt) {
-                    TCODConsole::setFullscreen(!TCODConsole::isFullscreen());
-                }
+                engine_exit();
             }
         } else if(game_state == SHOW_INVENTORY) {
             int index = (int)key.c - (int)'a';
@@ -1512,10 +1553,6 @@ int main( int argc, char *argv[] ) {
             
             if(key.vk == TCODK_ESCAPE) {
                 game_state = previous_game_state;
-            } else if(key.vk == TCODK_ENTER) {
-                if(key.lalt) {
-                    TCODConsole::setFullscreen(!TCODConsole::isFullscreen());
-                }
             }
         } else if(game_state == TARGETING) {
             int x = mouse.cx, y = mouse.cy;            
@@ -1551,48 +1588,7 @@ int main( int argc, char *argv[] ) {
         }
 
         //// UPDATE
-
-        if(game_state == PLAYER_TURN) {
-            int dx = player->x + m.x, dy = player->y + m.y; 
-            if((m.x != 0 || m.y != 0) && !map_blocked(game_map, dx, dy)) {
-                EntityFat *target;
-                if(entity_blocking_at(dx, dy, &target)) {
-                    player->fighter->attack(target);
-                } else {
-                    player->x = dx;
-                    player->y = dy;
-                    game_map.tcod_fov_map->computeFov(player->x, player->y, fov_radius, fov_light_walls, fov_algorithm);
-                }
-
-                game_state = ENEMY_TURN;
-            } else if(pickup) {
-                for(int i = 0; i < _entities.size(); i++) {
-                    auto entity = _entities[i];
-                    if(player->x == entity->x && player->y == entity->y && entity->item) {
-                        events_queue({ EventType::ItemPickup, entity });
-                        game_state = ENEMY_TURN;
-                        pickup = false;
-                        break;  
-                    }
-                }
-                // if we still want to pickup after we checked entities there is nothing to pickup
-                if(pickup) {
-                    events_queue({ EventType::Message, NULL, "There is nothing here to pick up.", TCOD_yellow });
-                }
-            } else if(take_stairs) {
-                for(int i = 0; i < _entities.size(); i++) {
-                    auto entity = _entities[i];
-                    if(player->x == entity->x && player->y == entity->y && entity->stairs) {
-                        events_queue({ EventType::NextFloor, entity });
-                        take_stairs = false;
-                        break;  
-                    }
-                }
-            }
-            if(take_stairs) {
-                events_queue({ EventType::Message, NULL, "There are no stairs here.", TCOD_yellow });
-            }
-        } else if(game_state == ENEMY_TURN) {
+        if(game_state == ENEMY_TURN) {
             for(int i = 1; i < _entities.size(); i++) {
                 const auto entity = _entities[i];
                 if(!entity->marked_for_deletion && entity->ai) {
