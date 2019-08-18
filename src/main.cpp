@@ -15,6 +15,7 @@
 // - systems -> iterate over entities
 
 ////// ECS
+/*
 #include <queue>
 #include <bitset>
 
@@ -54,21 +55,21 @@ struct EntityManager {
     std::queue<unsigned> _free_indices;
 
     Entity create() {
-        unsigned idx;
+        unsigned index;
         if (_free_indices.size() > MINIMUM_FREE_INDICES) {
-            idx = _free_indices.front();
+            index = _free_indices.front();
             _free_indices.pop();
         } else {
             _generation.push_back(0);
-            idx = _generation.size() - 1;
-            // ASSERT_WITH_MSG(idx < (1 << ENTITY_INDEX_BITS), "idx is malformed, larger than 22 bits?");
+            index = _generation.size() - 1;
+            // ASSERT_WITH_MSG(idx < (1 << ENTITY_INDEX_BITS), "index is malformed, larger than 22 bits?");
         }
-        return make_entity(idx, _generation[idx]);
+        return make_entity(index, _generation[index]);
     }
 
-    Entity make_entity(unsigned idx, unsigned char generation) {
+    Entity make_entity(unsigned index, unsigned char generation) {
         Entity e;
-        auto id = generation << ENTITY_INDEX_BITS | idx;
+        auto id = generation << ENTITY_INDEX_BITS | index;
         e.id = id;
         return e;
     }
@@ -90,7 +91,6 @@ typedef std::bitset<512> ComponentMask;
 
 struct PositionComponent { int x; };
 struct VisualComponent { char visual; };
-struct PlayerInput { int input; };
 
 const int MAX_ENTITIES = 1000;
 
@@ -99,51 +99,294 @@ struct Components {
     std::vector<PositionComponent> positions;
     std::vector<VisualComponent> visuals;
     std::vector<PlayerInput> player_inputs;
-
-    struct Base_MI {};
-
-    template<typename Component>
-    struct MI : Base_MI {
-        std::vector<Component> *components;
-        MI(std::vector<Component> *components) : components(components) {
-            components->reserve(MAX_ENTITIES);
-        }
-    };
-
-    std::unordered_map<size_t, Base_MI*> c_map;
-
-    void init() {
-        c_map.emplace(ComponentID::value<PositionComponent>(), new MI<PositionComponent>(&positions) );
-        c_map.emplace(ComponentID::value<VisualComponent>(), new MI<VisualComponent>(&visuals) );
-        c_map.emplace(ComponentID::value<PlayerInput>(), new MI<PlayerInput>(&player_inputs) );
-    }
 } comps;
+*/
+/*
 
-template<typename ComponentType>
-void add_component(Entity &e, ComponentType &t) {
-    auto map_i = static_cast<Components::MI<ComponentType>*>(comps.c_map[ComponentID::value<ComponentType>()]);
-    auto container = static_cast<std::vector<ComponentType>*>(map_i->components);
-    container->push_back(t);
-    // container[e.index()] = t;
-    
-    // comps.entities[e.index()] = e;
-    
-    // ADD TO BITSET OF ENTITY
+            static const int invalid_handle = -1;
+            std::unordered_map<EntityId, unsigned> _map;
+
+            unsigned int index = entity.size();
+            _map[e.id] = index;
+            entity.push_back(e);
+
+            
+            Handle get_handle(Entity e) {
+                auto a = _map.find(e.id);
+                if(a != _map.end()) {
+                    return { (int)a->second };
+                }
+                return { invalid_handle };
+            }
+
+            const Handle get_handle(Entity e) const {
+                auto a = _map.find(e.id);
+                if(a != _map.end()) {
+                    return { (int)a->second };
+                }
+                return { invalid_handle };
+            }
+
+ */
+// std::unordered_map<int, int> entity_map;
+
+#include <bitset>
+#include <initializer_list>
+
+class ComponentID {
+    static size_t counter;
+    public:
+        template<typename T>
+        static size_t value() {
+            static size_t id = counter++;
+            return id;
+        }
+};
+size_t ComponentID::counter = 0;
+
+typedef struct { 
+    int x; 
+} Position_t;
+
+typedef struct { 
+    char gfx; 
+} Visual_t;
+
+typedef std::bitset<512> ComponentMask;
+ComponentMask component_mask_make(std::initializer_list<size_t> list) {
+    ComponentMask mask;
+    if(list.size()) {
+        for(auto cid : list) {
+            mask.set(cid);
+        }
+    }
+    return mask;
 }
 
+// Entity handle
+typedef struct {
+    uint32_t id;
+    uint32_t generation;
+} Entity;
+
+typedef struct {
+    uint32_t index;
+    uint32_t generation;
+} generation_index_t;
+
+#define MAX_ENTITIES 1024
+uint32_t entity_id;
+std::unordered_map<uint32_t, generation_index_t> entityid_to_index_map;
+uint32_t num_entities;
+Entity entities[MAX_ENTITIES];
+ComponentMask masks[MAX_ENTITIES];
+
+Position_t positions[MAX_ENTITIES];
+Visual_t visuals[MAX_ENTITIES];
+
+Entity entity_create() {
+    // CHECK IF ID IS IN ANY QUEUE
+
+    uint32_t id = ++entity_id;
+    uint32_t index = num_entities++;
+    
+    entityid_to_index_map[id].index = index;
+    entityid_to_index_map[id].generation++;
+
+    Entity e;
+    e.id = id;
+    e.generation = entityid_to_index_map[id].generation;
+    entities[index] = e;
+
+    masks[index].reset();
+
+    const Position_t p = Position_t();
+    positions[index] = p;
+    const Visual_t v = Visual_t();
+    visuals[index] = v;    
+
+    return e;
+}
+
+void entity_remove(Entity handle) {
+    auto eindex = entityid_to_index_map[handle.id].index;
+    entityid_to_index_map[handle.id].generation++;
+
+    // PUT ID BACK IN A QUEUE
+
+    num_entities--;
+
+    entityid_to_index_map[entities[num_entities].id].index = eindex;
+    masks[eindex] = masks[num_entities];
+    entities[eindex] = entities[num_entities];    
+    positions[eindex] = positions[num_entities];
+    visuals[eindex] = visuals[num_entities];
+}
+
+bool entity_alive(Entity handle) {
+    return entityid_to_index_map[handle.id].generation == handle.generation;
+}
+
+struct ComponentHandle {
+    uint32_t i;
+};
+
+bool entity_get_handle(Entity handle, ComponentHandle &c) {
+    if(entity_alive(handle)) {
+        c.i = entityid_to_index_map[handle.id].index;
+        return true;
+    }
+    return false;
+}
+
+bool entity_has_component(Entity handle, size_t component_id) {
+    return masks[entityid_to_index_map[handle.id].index].test(component_id);
+}
 
 void test_entities() {
-    for(auto &pos : comps.positions) {
-        printf("pos: %d", pos.x);
+    printf("%d \n", num_entities);
+    
+
+    // Make 3 entities with components
+    // 2 different components
+
+    Entity e = entity_create();
+    ComponentHandle c;
+    entity_get_handle(e, c);
+    
+    positions[c.i].x = 44;
+    masks[c.i].set(ComponentID::value<Position_t>());
+    visuals[c.i].gfx = 'a';
+    masks[c.i].set(ComponentID::value<Visual_t>());
+    
+    e = entity_create();
+    entity_get_handle(e, c);
+
+    positions[c.i].x = 55;
+    masks[c.i].set(ComponentID::value<Position_t>());
+    
+    e = entity_create();
+    entity_get_handle(e, c);
+
+    positions[c.i].x = 66;
+    masks[c.i].set(ComponentID::value<Position_t>());
+    visuals[c.i].gfx = 'c';
+    masks[c.i].set(ComponentID::value<Visual_t>());
+
+    // iterate entities with both components (checking what components the entity has)
+    ComponentMask system_mask = component_mask_make({ ComponentID::value<Position_t>(), ComponentID::value<Visual_t>() });
+    for(int i = 0; i < num_entities; i++) {
+        if((masks[i] & system_mask) == system_mask) {
+            printf("%d  %c | ", positions[i].x, visuals[i].gfx);
+        }
+    }
+    printf("\n");
+
+    // iterate entities with only one of the components
+    system_mask = component_mask_make({ ComponentID::value<Position_t>() });
+    for(int i = 0; i < num_entities; i++) {
+        if((masks[i] & system_mask) == system_mask) {
+            printf(" %d | ", positions[i].x);
+        }
+    }
+    printf("\n");
+
+    // get an entity and use it by reference somehow (update a value)
+    // in an iteration sstore an entity somewhere and use it later (next step)
+    Entity handle;
+    Entity handle2 = entities[num_entities - 1];
+    system_mask = component_mask_make({ ComponentID::value<Position_t>() });
+    for(uint32_t i = 0; i < num_entities; i++) {
+        if(i == 1) {
+            handle = entities[i];
+        }
     }
 
-    comps.init();
-    EntityManager em;
-    auto e = em.create();
-    add_component(e, PositionComponent { 55 });
+    // evaluate if entity is valid and use it if it is
+    if(entityid_to_index_map[handle.id].generation == handle.generation) {
+        positions[entityid_to_index_map[handle.id].index].x = 666;
+    }
 
-    for(auto &pos : comps.positions) {
-        printf("pos: %d", pos.x);
+    // iterate entities
+    printf("-- iterate all positions \n");
+    for(int i = 0; i < num_entities; i++) {
+        printf(" %d | ", positions[i].x);
+    }
+    printf("\n");
+
+    // delete that entity
+    entity_remove(handle);
+
+
+    // evaluate if it is valid
+    if(entity_alive(handle)) {
+        printf("this is incorrect ;( \n");
+    } else {
+        printf("this is correct \n");
+    }
+
+    // evaluate if it is valid
+    if(entityid_to_index_map[handle2.id].generation == handle2.generation) {
+        printf("this is correct:  pos -> %d \n", positions[entityid_to_index_map[handle2.id].index].x);
+    } else {
+        printf("this should not be printed \n");
+    }
+
+    // iterate entities
+    for(int i = 0; i < num_entities; i++) {
+        printf(" pos: %d , vis: %c | ", positions[i].x, visuals[i].gfx);
+    }
+    printf("\n");
+
+    printf("Create a new entity: \n");
+    e = entity_create();
+    entity_get_handle(e, c);
+    
+    positions[c.i].x = 123;
+    masks[c.i].set(ComponentID::value<Position_t>());
+    visuals[c.i].gfx = 'Y';
+    masks[c.i].set(ComponentID::value<Visual_t>());
+
+    // iterate entities
+    system_mask = component_mask_make({ ComponentID::value<Position_t>(), ComponentID::value<Visual_t>() });
+    for(int i = 0; i < num_entities; i++) {
+        if((masks[i] & system_mask) == system_mask) {
+            printf("%d  %c | ", positions[i].x, visuals[i].gfx);
+        }
+    }
+    printf("\n");
+
+    // evaluate if it is valid
+    if(entity_alive(handle)) {
+        printf("this is incorrect ;( \n");
+    } else {
+        printf("this is correct \n");
+    }
+    // evaluate if it is valid
+    if(entity_alive(handle2)) {
+        printf("this is correct:  pos -> %d \n", positions[entityid_to_index_map[handle2.id].index].x);
+    } else {
+        printf("this should not be printed \n");
+    }
+
+    handle2 = entities[num_entities - 1];
+
+
+    if(entity_get_handle(handle2, c)) {
+        if(entity_has_component(handle2, ComponentID::value<Position_t>())) {
+            printf("this is correct:  pos -> %d \n", positions[c.i].x);
+        } else {
+            printf("this should not be printed \n");
+        }
+    } else {
+        printf("this should not be printed \n");
+    }
+    
+    entity_remove(handle2);
+    if(entity_get_handle(handle2, c)) {
+        printf("this should not be printed \n");
+    } else {
+        printf("this is correct \n");
     }
 }
 
