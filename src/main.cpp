@@ -231,16 +231,21 @@ struct ComponentHandle {
     uint32_t i;
 };
 
-bool entity_get_handle(Entity handle, ComponentHandle &c) {
-    if(entity_alive(handle)) {
-        c.i = entityid_to_index_map[handle.id].index;
-        return true;
-    }
-    return false;
+ComponentHandle entity_get_handle(Entity handle) {
+    ComponentHandle c;
+    c.i = entityid_to_index_map[handle.id].index;
+    return c;
 }
 
 bool entity_has_component(Entity handle, size_t component_id) {
-    return masks[entityid_to_index_map[handle.id].index].test(component_id);
+    auto index = entityid_to_index_map[handle.id].index;
+    return masks[index].test(component_id);
+}
+
+template<typename Component>
+void entity_add_component(const ComponentHandle &ch, Component ca[], Component c) {
+    ca[ch.i] = c;
+    masks[ch.i].set(ComponentID::value<Component>());
 }
 
 void test_entities() {
@@ -251,27 +256,21 @@ void test_entities() {
     // 2 different components
 
     Entity e = entity_create();
-    ComponentHandle c;
-    entity_get_handle(e, c);
+    ComponentHandle c = entity_get_handle(e);
     
-    positions[c.i].x = 44;
-    masks[c.i].set(ComponentID::value<Position_t>());
-    visuals[c.i].gfx = 'a';
-    masks[c.i].set(ComponentID::value<Visual_t>());
+    entity_add_component(c, positions, Position_t { 44 });
+    entity_add_component(c, visuals, Visual_t { 'a' });
     
     e = entity_create();
-    entity_get_handle(e, c);
+    c = entity_get_handle(e);
 
-    positions[c.i].x = 55;
-    masks[c.i].set(ComponentID::value<Position_t>());
+    entity_add_component(c, positions, Position_t { 55 });
     
     e = entity_create();
-    entity_get_handle(e, c);
+    c = entity_get_handle(e);
 
-    positions[c.i].x = 66;
-    masks[c.i].set(ComponentID::value<Position_t>());
-    visuals[c.i].gfx = 'c';
-    masks[c.i].set(ComponentID::value<Visual_t>());
+    entity_add_component(c, positions, Position_t { 66 });
+    entity_add_component(c, visuals, Visual_t { 'c' });
 
     // iterate entities with both components (checking what components the entity has)
     ComponentMask system_mask = component_mask_make({ ComponentID::value<Position_t>(), ComponentID::value<Visual_t>() });
@@ -340,7 +339,7 @@ void test_entities() {
 
     printf("Create a new entity: \n");
     e = entity_create();
-    entity_get_handle(e, c);
+    c = entity_get_handle(e);
     
     positions[c.i].x = 123;
     masks[c.i].set(ComponentID::value<Position_t>());
@@ -372,7 +371,8 @@ void test_entities() {
     handle2 = entities[num_entities - 1];
 
 
-    if(entity_get_handle(handle2, c)) {
+    if(entity_alive(handle2)) {
+        c = entity_get_handle(e);
         if(entity_has_component(handle2, ComponentID::value<Position_t>())) {
             printf("this is correct:  pos -> %d \n", positions[c.i].x);
         } else {
@@ -383,11 +383,21 @@ void test_entities() {
     }
     
     entity_remove(handle2);
-    if(entity_get_handle(handle2, c)) {
+
+    if(entity_alive(handle2)) {
         printf("this should not be printed \n");
     } else {
         printf("this is correct \n");
     }
+
+    // iterate entities
+    system_mask = component_mask_make({ ComponentID::value<Position_t>() });
+    for(int i = 0; i < num_entities; i++) {
+        if((masks[i] & system_mask) == system_mask) {
+            printf("%d | ", positions[i].x);
+        }
+    }
+    printf("\n");
 }
 
 // void create_entity() {
