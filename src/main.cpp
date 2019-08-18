@@ -242,10 +242,18 @@ bool entity_has_component(Entity handle, size_t component_id) {
     return masks[index].test(component_id);
 }
 
+bool entity_has_component(const ComponentHandle &ch, size_t component_id) {
+    return masks[ch.i].test(component_id);
+}
+
 template<typename Component>
 void entity_add_component(const ComponentHandle &ch, Component ca[], Component c) {
     ca[ch.i] = c;
     masks[ch.i].set(ComponentID::value<Component>());
+}
+
+void entity_remove_component(const ComponentHandle &ch, size_t component_id) {
+    masks[ch.i].reset(component_id);
 }
 
 void test_entities() {
