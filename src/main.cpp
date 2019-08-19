@@ -2069,16 +2069,26 @@ int main( int argc, char *argv[] ) {
                 }
                 case EventType::EntityDead: {
                     // shitty way to know if player died
-                    if(e.entity == player) {
+                    if(e.entity == player_handle) {
+                        ComponentHandle c = entity_get_handle(e.entity);
+                        EntityFat *player = &entity_fats[c.i];
+                        
                         gui_log_message(TCOD_red, "YOU died!");
                         game_state = PLAYER_DEAD;
                         player->gfx = '%';
                         player->color = TCOD_dark_red;
                         player->render_order = render_priority.CORPSE;
                     } else {
-                        gui_log_message(TCOD_light_green, "%s died!", e.entity->name.c_str());
+                        ComponentHandle c = entity_get_handle(player_handle);
+                        EntityFat *player = &entity_fats[c.i];
                         
-                        auto xp_gained = e.entity->fighter->xp;
+                        ComponentHandle c = entity_get_handle(e.entity);
+                        EntityFat *entity = &entity_fats[c.i];
+                        Fighter *entity_fighter = &fighters[c.i];
+
+                        gui_log_message(TCOD_light_green, "%s died!", entity->name.c_str());
+                        
+                        auto xp_gained = entity_fighter->xp;
                         bool leveled_up = player->level->add_xp(xp_gained);
                         gui_log_message(TCOD_yellow, "You gain %d experience points.", xp_gained);
                         
@@ -2088,15 +2098,14 @@ int main( int argc, char *argv[] ) {
                             game_state = LEVEL_UP;
                         }
 
-                        e.entity->gfx = '%';
-                        e.entity->color = TCOD_dark_red;
-                        e.entity->render_order = render_priority.CORPSE;
-                        e.entity->blocks = false;
-                        delete e.entity->fighter;
-                        e.entity->fighter = NULL;
-                        delete e.entity->ai;
-                        e.entity->ai = NULL;
-                        e.entity->name = "remains of " + e.entity->name;
+                        entity->gfx = '%';
+                        entity->color = TCOD_dark_red;
+                        entity->render_order = render_priority.CORPSE;
+                        entity->blocks = false;
+                        enemy->name = "remains of " + e.entity->name;
+
+                        entity_remove_component<Fighter>(e.entity);
+                        // entity_remove_component<Ai>(e.entity);
                     }
                     break;
                 }
