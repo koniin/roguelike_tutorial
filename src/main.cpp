@@ -1052,6 +1052,18 @@ struct Fighter {
 //     return false;
 // }
 
+
+GameMap game_map;
+
+// EntityFat *player;
+GameState game_state = MAIN_MENU;
+GameState previous_game_state = MAIN_MENU;
+// EntityFat *targeting_item = NULL;
+
+EntityFat entity_fats[MAX_ENTITIES];
+Fighter fighters[MAX_ENTITIES];
+
+
 // UI
 const int Bar_width = 20;
 const int Panel_height = 7;
@@ -1171,45 +1183,49 @@ std::vector<MonsterBlueprint> monster_data = {
     }
 };
 
-// void map_add_monsters(GameMap &map) {
-//     for(const Rect &room : map.rooms) {
-//         std::vector<WeightByLevel> weights = { { 2, 1 }, { 3, 4 }, { 5, 6 } };
-//         int number_of_monsters = from_dungeon_level(weights, map.level);
-//         // int number_of_monsters = rand_int(0, max_monsters_per_room);
-//         for(int i = 0; i < number_of_monsters; i++) {
-//             int x = rand_int(room.x + 1, room.x2 - 1); 
-//             int y = rand_int(room.y + 1, room.y2 - 1);
+void map_add_monsters(GameMap &map) {
+    for(const Rect &room : map.rooms) {
+        std::vector<WeightByLevel> weights = { { 2, 1 }, { 3, 4 }, { 5, 6 } };
+        int number_of_monsters = from_dungeon_level(weights, map.level);
+        // int number_of_monsters = rand_int(0, max_monsters_per_room);
+        for(int i = 0; i < number_of_monsters; i++) {
+            int x = rand_int(room.x + 1, room.x2 - 1); 
+            int y = rand_int(room.y + 1, room.y2 - 1);
 
-//             bool occupied = false;
-//             for(int ei = 0; ei < _entities.size(); ei++) {
-//                 EntityFat *e = _entities[ei];
-//                 if(e->x == x && e->y == y) {
-//                     occupied = true;
-//                     break;
-//                 }
-//             }
-//             if(occupied) {
-//                 continue;
-//             }
+            bool occupied = false;
+            for(uint32_t ei = 0; ei < num_entities; ei++) {
+                //we assume all entities have the base entity component
+                EntityFat *e = &entity_fats[ei];
+                if(e->x == x && e->y == y) {
+                    occupied = true;
+                    break;
+                }
+            }
+            if(occupied) {
+                continue;
+            }
 
-//             std::vector<int> chances;
-//             chances.reserve(monster_data.size());
-//             for(auto md : monster_data) {
-//                 int chance = from_dungeon_level(md.weights, map.level);
-//                 if(chance > 0)
-//                     chances.push_back(chance);
-//             }
-//             auto blueprint_index = rand_weighted_index(chances.data(), chances.size());
-//             auto &m = monster_data[blueprint_index];
-//             EntityFat *e;
-//             e = new EntityFat(x, y, m.visual, m.color, m.name, true, render_priority.ENTITY );
-//             e->fighter = new Fighter(e, m.hp, m.defense, m.power, m.xp);
-//             e->ai = new BasicMonster(e);
-//             _entities.push_back(e);            
-//         }
-//     }
-// }
+            std::vector<int> chances;
+            chances.reserve(monster_data.size());
+            for(auto md : monster_data) {
+                int chance = from_dungeon_level(md.weights, map.level);
+                if(chance > 0)
+                    chances.push_back(chance);
+            }
+            auto blueprint_index = rand_weighted_index(chances.data(), chances.size());
+            auto &m = monster_data[blueprint_index];
 
+            auto e = entity_create();
+            auto c = entity_get_handle(e);
+            entity_add_component(c, entity_fats, EntityFat(x, y, m.visual, m.color, m.name, true, render_priority.ENTITY ));
+            entity_add_component(c, fighters, Fighter(m.hp, m.defense, m.power, m.xp));
+            
+            
+            //e->ai = new BasicMonster(e);
+            //_entities.push_back(e);            
+        }
+    }
+}
 
 struct ItemBlueprint {
     std::vector<WeightByLevel> weights;
@@ -1560,16 +1576,6 @@ void gui_render_main_menu(TCODConsole *con, int screen_width, int screen_height)
 //                         con, x, y, 1.0, 0.7);
 // }
 
-GameMap game_map;
-
-// EntityFat *player;
-GameState game_state = MAIN_MENU;
-GameState previous_game_state = MAIN_MENU;
-// EntityFat *targeting_item = NULL;
-
-EntityFat entity_fats[MAX_ENTITIES];
-Fighter fighters[MAX_ENTITIES];
-
 void entity_created(const uint32_t &index) {
     // Here you can decide if you want to reset or do nothing
     // If all components have proper constructors this doesnt need to do anything
@@ -1625,7 +1631,7 @@ void new_game() {
     game_map.tcod_fov_map->computeFov(entity_fats[c.i].x, entity_fats[c.i].y, fov_radius, fov_light_walls, fov_algorithm);
 
     // add entities to map
-    // map_add_monsters(game_map);
+    map_add_monsters(game_map);
     // map_add_items(game_map);
     // map_add_stairs(game_map);
     
