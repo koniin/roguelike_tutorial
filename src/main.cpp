@@ -254,7 +254,7 @@ ComponentMask create_mask() {
     return create_mask<C1>() | create_mask<C2, Components ...>();
 }
 
-void entities_iterate(const ComponentMask &system_mask, std::function<void(uint32_t &index)> f) {
+void entity_iterate(const ComponentMask &system_mask, std::function<void(uint32_t &index)> f) {
     for(uint32_t i = 0; i < num_entities; i++) {
         if((masks[i] & system_mask) == system_mask) {
             f(i);
@@ -1364,10 +1364,6 @@ void move_towards(const GameMap &map, int &x, int &y, const int target_x, const 
     }
 }
 
-// bool entity_render_sort(const EntityFat *first, const EntityFat *second) {
-//     return first->render_order < second->render_order;
-// }
-
 // void gui_render_bar(TCODConsole *panel, int x, int y, int total_width, std::string name, 
 //                     int value, int maximum, TCOD_color_t bar_color, TCOD_color_t back_color) {
 //     int bar_width = int(float(value) / maximum * total_width);
@@ -1683,6 +1679,18 @@ void next_floor(GameMap &map) {
     // events_queue({ EventType::Message, NULL, "You take a moment to rest, and recover your strength." });
 }
 
+struct RenderItem {
+    int x;
+    int y;
+    TCODColor color;
+    int gfx;
+    int render_order;
+};
+
+bool entity_render_sort(const RenderItem &first, const RenderItem &second) {
+    return first.render_order < second.render_order;
+}
+
 void render_game() {
     for(int y = 0; y < Map_Height; y++) {
         for(int x = 0; x < Map_Width; x++) {
@@ -1698,7 +1706,27 @@ void render_game() {
         }
     }
 
-    // std::sort(_entities.begin(), _entities.end(), entity_render_sort);
+    std::vector<RenderItem> render_items;
+    render_items.reserve(MAX_ENTITIES);
+
+    entity_iterate(create_mask<EntityFat>(), [&](const uint32_t &i) {
+        render_items.push_back({
+            entity_fats[i].x,
+            entity_fats[i].y,
+            entity_fats[i].color,
+            entity_fats[i].gfx,
+            entity_fats[i].render_order
+        });
+    });
+    std::sort(render_items.begin(), render_items.end(), entity_render_sort);    
+
+    for(auto &ri : render_items) {
+        if(game_map.tcod_fov_map->isInFov(ri.x, ri.y)) {
+        //if((entity->stairs && game_map.tiles[map_index(ri.x, ri.y)].explored) {
+            root_console->setDefaultForeground(ri.color);
+            root_console->putChar(ri.x, ri.y, ri.gfx);
+        }
+    }
 
     // for(int i = 0; i < _entities.size(); i++) {
     //     const auto entity = _entities[i];
