@@ -647,13 +647,14 @@ struct EntityFat {
     std::string name;
     bool blocks = false;
     int render_order = 0;
-    bool marked_for_deletion = false;
 
     EntityFat() {}
     EntityFat(int x_, int y_, int gfx_, TCODColor color_, std::string name_, bool blocks_, int render_order_) : 
         x(x_), y(y_), gfx(gfx_), color(color_), name(name_), blocks(blocks_), render_order(render_order_) {
     }
 };
+
+EntityFat &get_entityfat(Entity e);
 
 // void move_towards(const GameMap &map, EntityFat *entity, int target_x, int target_y);
 
@@ -853,42 +854,19 @@ struct Fighter {
     // //     return hp_max + bonus;
     // // }
 
-    // // int power() {
-    // //     int bonus = _owner && _owner->equipment ? _owner->equipment->power_bonus() : 0;
-    // //     return power_max + bonus;
-    // // }
+    int power() {
+        // int bonus = _owner && _owner->equipment ? _owner->equipment->power_bonus() : 0;
+        int bonus = 0;
+        return power_max + bonus;
+    }
 
-    // // int defense() {
-    // //     int bonus = _owner && _owner->equipment ? _owner->equipment->defense_bonus() : 0;
-    // //     return defense_max + bonus;
-    // // }
+    int defense() {
+        //int bonus = _owner && _owner->equipment ? _owner->equipment->defense_bonus() : 0;
+        int bonus = 0;
+        return defense_max + bonus;
+    }
     
-    // void take_damage(int amount) {
-    //     hp -= amount;
 
-    //     if(hp <= 0) {
-    //         events_queue({ EventType::EntityDead, _owner });
-    //         _owner->marked_for_deletion = true;
-    //     }
-    // }
-
-    // void attack(EntityFat *entity) {
-    //     int damage = power() - entity->fighter->defense();
-
-    //     if(damage > 0) {
-    //         // VERY SHITTY STRING ALLOCATION
-    //         char buffer[255];
-    //         sprintf(buffer, "%s attacks %s for %d hit points", _owner->name.c_str(), entity->name.c_str(), damage);
-    //         events_queue({ EventType::Message, NULL, buffer, TCOD_amber });
-
-    //         entity->fighter->take_damage(damage);
-    //     } else {
-    //         // VERY SHITTY STRING ALLOCATION
-    //         char buffer[255];
-    //         sprintf(buffer, "%s attacks %s but deals no damage", _owner->name.c_str(), entity->name.c_str());
-    //         events_queue({ EventType::Message, NULL, buffer, TCOD_light_grey });
-    //     }
-    // }
 
     // void heal(int amount) {
     //     hp += amount;
@@ -898,6 +876,37 @@ struct Fighter {
     // }
 };
 
+Fighter &get_fighter(Entity e);
+
+void take_damage(Entity entity, int amount) {
+    Fighter &f = get_fighter(entity);
+    f.hp -= amount;
+    if(f.hp <= 0) {
+        events_queue({ EventType::EntityDead, entity });
+    }
+}
+
+void attack(Entity attacker_e, Entity defender_e) {
+    EntityFat &e_attacker = get_entityfat(attacker_e);
+    EntityFat &e_defender = get_entityfat(defender_e);
+    
+    Fighter &attacker = get_fighter(attacker_e);
+    Fighter &target_fighter = get_fighter(defender_e);
+
+    int damage = attacker.power() - target_fighter.defense();
+    if(damage > 0) {
+        // VERY SHITTY STRING ALLOCATION
+        char buffer[255];
+        sprintf(buffer, "%s attacks %s for %d hit points", e_attacker.name.c_str(), e_defender.name.c_str(), damage);
+        events_queue({ EventType::Message, attacker_e, buffer, TCOD_amber });
+        take_damage(defender_e, damage);
+    } else {
+        // VERY SHITTY STRING ALLOCATION
+        char buffer[255];
+        sprintf(buffer, "%s attacks %s but deals no damage", e_attacker.name.c_str(), e_defender.name.c_str());
+        events_queue({ EventType::Message, attacker_e, buffer, TCOD_light_grey });
+    }
+}
 // struct Ai {
 //     virtual void take_turn(EntityFat *target, GameMap &map) = 0;
 // };
@@ -1063,6 +1072,15 @@ GameState previous_game_state = MAIN_MENU;
 EntityFat entity_fats[MAX_ENTITIES];
 Fighter fighters[MAX_ENTITIES];
 
+EntityFat &get_entityfat(Entity e) {
+    ComponentHandle c = entity_get_handle(e);
+    return entity_fats[c.i];
+}
+
+Fighter &get_fighter(Entity e) {
+    ComponentHandle c = entity_get_handle(e);
+    return fighters[c.i];
+}
 
 // UI
 const int Bar_width = 20;
@@ -1344,21 +1362,20 @@ std::vector<ItemBlueprint> item_data = {
 //     _entities.push_back(e);
 // }
 
-// bool entity_blocking_at(int x, int y, EntityFat **found_entity) {
-//     for(int i = 0; i < _entities.size(); i++) {
-//         auto entity = _entities[i];
-//         if(x == entity->x && y == entity->y && entity->blocks) {
-//             *found_entity = _entities[i];
-//             return true;
-//         }
-//     }
-//     return false;
-// }
+bool entity_blocking_at(int x, int y, Entity &found_entity) {
+    for(uint32_t i = 0; i < num_entities; i++) {
+        auto entity = &entity_fats[i];
+        if(x == entity->x && y == entity->y && entity->blocks) {
+            found_entity = entities[i];
+            return true;
+        }
+    }
+    return false;
+}
 
 bool can_walk(const GameMap &map, int x, int y) {
-    return !map_blocked(map, x, y);
-    // EntityFat *target;
-    // return !map_blocked(map, x, y) && !entity_blocking_at(x, y, &target);
+    Entity target;
+    return !map_blocked(map, x, y) && !entity_blocking_at(x, y, target);
 }
 
 void move_towards(const GameMap &map, int &x, int &y, const int target_x, const int target_y) {
@@ -1380,21 +1397,21 @@ void move_towards(const GameMap &map, int &x, int &y, const int target_x, const 
     }
 }
 
-// void gui_render_bar(TCODConsole *panel, int x, int y, int total_width, std::string name, 
-//                     int value, int maximum, TCOD_color_t bar_color, TCOD_color_t back_color) {
-//     int bar_width = int(float(value) / maximum * total_width);
+void gui_render_bar(TCODConsole *panel, int x, int y, int total_width, std::string name, 
+                    int value, int maximum, TCOD_color_t bar_color, TCOD_color_t back_color) {
+    int bar_width = int(float(value) / maximum * total_width);
 
-//     panel->setDefaultBackground(back_color);
-//     panel->rect(x, y, total_width, 1, false, TCOD_BKGND_SCREEN);
+    panel->setDefaultBackground(back_color);
+    panel->rect(x, y, total_width, 1, false, TCOD_BKGND_SCREEN);
 
-//     panel->setDefaultBackground(bar_color);
-//     if(bar_width > 0) {
-//         panel->rect(x, y, bar_width, 1, false, TCOD_BKGND_SCREEN);
-//     }
+    panel->setDefaultBackground(bar_color);
+    if(bar_width > 0) {
+        panel->rect(x, y, bar_width, 1, false, TCOD_BKGND_SCREEN);
+    }
 
-//     panel->setDefaultForeground(TCOD_white);
-//     panel->printEx(x + total_width / 2, y, TCOD_BKGND_NONE, TCOD_CENTER, "%s: %d/%d", name.c_str(), value, maximum);
-// }
+    panel->setDefaultForeground(TCOD_white);
+    panel->printEx(x + total_width / 2, y, TCOD_BKGND_NONE, TCOD_CENTER, "%s: %d/%d", name.c_str(), value, maximum);
+}
 
 struct LogEntry {
     char *text;
@@ -1743,21 +1760,24 @@ void render_game() {
     //     }
     // }
     
-    // bar->setDefaultBackground(TCODColor::black);
-    // bar->clear();
-    // gui_render_bar(bar, 1, 1, Bar_width, "HP", player->fighter->hp, player->fighter->hp_max, TCOD_light_red, TCOD_darker_red);
+    bar->setDefaultBackground(TCODColor::black);
+    bar->clear();
+
+    ComponentHandle c = entity_get_handle(player_handle);
+    Fighter *player_fighter = &fighters[c.i];        
+    gui_render_bar(bar, 1, 1, Bar_width, "HP", player_fighter->hp, player_fighter->hp_max, TCOD_light_red, TCOD_darker_red);
     // gui_render_mouse_look(bar, game_map, mouse.cx, mouse.cy);
-    // bar->printEx(1, 3, TCOD_BKGND_NONE, TCOD_LEFT, "Dungeon level: %d", game_map.level);
+    bar->printEx(1, 3, TCOD_BKGND_NONE, TCOD_LEFT, "Dungeon level: %d", game_map.level);
     
-    // float colorCoef = 0.4f;
-    // for(int i = 0, y = 1; i < gui_log.size(); i++, y++) {
-    //     bar->setDefaultForeground(gui_log[i]->color * colorCoef);
-    //     bar->print(Log_x, y, gui_log[i]->text);
-    //     // could one-line this with a clamp;
-    //     if (colorCoef < 1.0f ) {
-    //         colorCoef += 0.3f;
-    //     }
-    // }
+    float colorCoef = 0.4f;
+    for(int i = 0, y = 1; i < gui_log.size(); i++, y++) {
+        bar->setDefaultForeground(gui_log[i]->color * colorCoef);
+        bar->print(Log_x, y, gui_log[i]->text);
+        // could one-line this with a clamp;
+        if (colorCoef < 1.0f ) {
+            colorCoef += 0.3f;
+        }
+    }
 
     TCODConsole::blit(bar, 0, 0, SCREEN_WIDTH, Panel_height, root_console, 0, Panel_y);
 }
@@ -1848,14 +1868,14 @@ struct GamePlay : State {
             EntityFat *player = &entity_fats[c.i];
             int dx = player->x + m.x, dy = player->y + m.y; 
             if((m.x != 0 || m.y != 0) && !map_blocked(game_map, dx, dy)) {
-                // EntityFat *target;
-                // if(entity_blocking_at(dx, dy, &target)) {
-                //     player->fighter->attack(target);
-                // } else {
+                Entity target;
+                if(entity_blocking_at(dx, dy, target)) {
+                    attack(player_handle, target);
+                } else {
                     player->x = dx;
                     player->y = dy;
                     game_map.tcod_fov_map->computeFov(player->x, player->y, fov_radius, fov_light_walls, fov_algorithm);
-                // }
+                }
 
                 game_state = ENEMY_TURN;
             } else if(pickup) {
@@ -2047,39 +2067,39 @@ int main( int argc, char *argv[] ) {
                     gui_log_message(e.color, e.message.c_str());
                     break;
                 }
-                // case EventType::EntityDead: {
-                //     // shitty way to know if player died
-                //     if(e.entity == player) {
-                //         gui_log_message(TCOD_red, "YOU died!");
-                //         game_state = PLAYER_DEAD;
-                //         player->gfx = '%';
-                //         player->color = TCOD_dark_red;
-                //         player->render_order = render_priority.CORPSE;
-                //     } else {
-                //         gui_log_message(TCOD_light_green, "%s died!", e.entity->name.c_str());
+                case EventType::EntityDead: {
+                    // shitty way to know if player died
+                    if(e.entity == player) {
+                        gui_log_message(TCOD_red, "YOU died!");
+                        game_state = PLAYER_DEAD;
+                        player->gfx = '%';
+                        player->color = TCOD_dark_red;
+                        player->render_order = render_priority.CORPSE;
+                    } else {
+                        gui_log_message(TCOD_light_green, "%s died!", e.entity->name.c_str());
                         
-                //         auto xp_gained = e.entity->fighter->xp;
-                //         bool leveled_up = player->level->add_xp(xp_gained);
-                //         gui_log_message(TCOD_yellow, "You gain %d experience points.", xp_gained);
+                        auto xp_gained = e.entity->fighter->xp;
+                        bool leveled_up = player->level->add_xp(xp_gained);
+                        gui_log_message(TCOD_yellow, "You gain %d experience points.", xp_gained);
                         
-                //         if(leveled_up) {
-                //             gui_log_message(TCOD_yellow, "You become stronger! You reached level %d", player->level->current_level);
-                //             previous_game_state = game_state;
-                //             game_state = LEVEL_UP;
-                //         }
+                        if(leveled_up) {
+                            gui_log_message(TCOD_yellow, "You become stronger! You reached level %d", player->level->current_level);
+                            previous_game_state = game_state;
+                            game_state = LEVEL_UP;
+                        }
 
-                //         e.entity->gfx = '%';
-                //         e.entity->color = TCOD_dark_red;
-                //         e.entity->render_order = render_priority.CORPSE;
-                //         e.entity->blocks = false;
-                //         delete e.entity->fighter;
-                //         e.entity->fighter = NULL;
-                //         delete e.entity->ai;
-                //         e.entity->ai = NULL;
-                //         e.entity->name = "remains of " + e.entity->name;
-                //     }
-                //     break;
-                // }
+                        e.entity->gfx = '%';
+                        e.entity->color = TCOD_dark_red;
+                        e.entity->render_order = render_priority.CORPSE;
+                        e.entity->blocks = false;
+                        delete e.entity->fighter;
+                        e.entity->fighter = NULL;
+                        delete e.entity->ai;
+                        e.entity->ai = NULL;
+                        e.entity->name = "remains of " + e.entity->name;
+                    }
+                    break;
+                }
                 // case EventType::ItemPickup: {
                 //     auto success = player->inventory->add_item(e.entity);
                 //     if(success) {
