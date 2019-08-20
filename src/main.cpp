@@ -12,6 +12,7 @@
 
 /// Goals
 // - make it work (with current setup)
+    => Dropping an item doesnt seem to work very well (did it ever?)
 // - better events (typed)
 // - make a simpler iteration function
 // - make systems
