@@ -607,67 +607,88 @@ struct Stairs {
     Stairs(int floor) : floor(floor) {} 
 };
 
-// enum EquipmentSlot {
-//     MAIN_HAND,
-//     OFF_HAND
-// };
-// struct Equippable {
-//     EquipmentSlot slot;
-//     int power_bonus;
-//     int defense_bonus;
-//     int max_hp_bonus;
+enum EquipmentSlot {
+    MAIN_HAND,
+    OFF_HAND
+};
+struct Equippable {
+    EquipmentSlot slot;
+    int power_bonus;
+    int defense_bonus;
+    int max_hp_bonus;
 
-//     Equippable(EquipmentSlot slot, int power_bonus, int defense_bonus, int max_hp_bonus) 
-//         : slot(slot), power_bonus(power_bonus), defense_bonus(defense_bonus), max_hp_bonus(max_hp_bonus)
-//         {}
-// };
+    Equippable() {}
+    Equippable(EquipmentSlot slot, int power_bonus, int defense_bonus, int max_hp_bonus) 
+        : slot(slot), power_bonus(power_bonus), defense_bonus(defense_bonus), max_hp_bonus(max_hp_bonus)
+        {}
+};
+
+Equippable &get_equippable(Entity &e);
 
 struct Equipment {
-    /* 
-    EntityFat *main_hand = NULL;
-    EntityFat *off_hand = NULL;
+    Entity main_hand = InvalidEntity;
+    Entity off_hand = InvalidEntity;
 
     int max_hp_bonus() {
         int bonus = 0;
-        bonus += (main_hand && main_hand->equippable) ? main_hand->equippable->max_hp_bonus : 0;
-        bonus += (off_hand && off_hand->equippable) ? off_hand->equippable->max_hp_bonus : 0;
+        if(!entity_equals(main_hand, InvalidEntity) && entity_has_component<Equippable>(main_hand)) {
+            auto &eq = get_equippable(main_hand);
+            bonus += eq.max_hp_bonus;
+        }
+        if(!entity_equals(off_hand, InvalidEntity) && entity_has_component<Equippable>(off_hand)) {
+            auto &eq = get_equippable(off_hand);
+            bonus += eq.max_hp_bonus;
+        }
         return bonus;
     }
 
     int power_bonus() {
         int bonus = 0;
-        bonus += (main_hand && main_hand->equippable) ? main_hand->equippable->power_bonus : 0;
-        bonus += (off_hand && off_hand->equippable) ? off_hand->equippable->power_bonus : 0;
+        if(!entity_equals(main_hand, InvalidEntity) && entity_has_component<Equippable>(main_hand)) {
+            auto &eq = get_equippable(main_hand);
+            bonus += eq.power_bonus;
+        }
+        if(!entity_equals(off_hand, InvalidEntity) && entity_has_component<Equippable>(off_hand)) {
+            auto &eq = get_equippable(off_hand);
+            bonus += eq.power_bonus;
+        }
         return bonus;
     }
 
     int defense_bonus() {
         int bonus = 0;
-        bonus += (main_hand && main_hand->equippable) ? main_hand->equippable->defense_bonus : 0;
-        bonus += (off_hand && off_hand->equippable) ? off_hand->equippable->defense_bonus : 0;
+        if(!entity_equals(main_hand, InvalidEntity) && entity_has_component<Equippable>(main_hand)) {
+            auto &eq = get_equippable(main_hand);
+            bonus += eq.defense_bonus;
+        }
+        if(!entity_equals(off_hand, InvalidEntity) && entity_has_component<Equippable>(off_hand)) {
+            auto &eq = get_equippable(off_hand);
+            bonus += eq.defense_bonus;
+        }
         return bonus;
     }
 
-    void toggle_equipment(EntityFat *equippable_entity) {
-        auto slot = equippable_entity->equippable->slot;
+    void toggle_equipment(Entity equippable_entity) {
+        auto &eq = get_equippable(equippable_entity);
+        auto slot = eq.slot;
 
         if(slot == MAIN_HAND) {
-            if(main_hand == equippable_entity) {
+            if(entity_equals(main_hand, equippable_entity)) {
                 events_queue({ EventType::EquipmentChange, equippable_entity, "", TCOD_amber, 0 });
-                main_hand = NULL;
+                main_hand = InvalidEntity;
             } else {
-                if(main_hand) {
+                if(entity_equals(main_hand, InvalidEntity)) {
                     events_queue({ EventType::EquipmentChange, main_hand, "", TCOD_amber, 0 });
                 }
                 main_hand = equippable_entity;
                 events_queue({ EventType::EquipmentChange, equippable_entity, "", TCOD_amber, 1 });
             }
         } else if(slot == OFF_HAND) {
-            if(off_hand == equippable_entity) {
+            if(entity_equals(off_hand, equippable_entity)) {
                 events_queue({ EventType::EquipmentChange, equippable_entity, "", TCOD_amber, 0 });
-                off_hand = NULL;
+                off_hand = InvalidEntity;
             } else {
-                if(off_hand) {
+                if(!entity_equals(off_hand, InvalidEntity)) {
                     events_queue({ EventType::EquipmentChange, off_hand, "", TCOD_amber, 0 });
                 }
                 off_hand = equippable_entity;
@@ -677,8 +698,9 @@ struct Equipment {
             engine_log(LogStatus::Warning, "Equipment slot is not implemented " + std::to_string(slot));
         }
     }
-    */
 };
+
+Equipment &get_equipment(Entity &e);
 
 struct Item {
     int id;
@@ -713,10 +735,11 @@ struct Inventory {
     }
 
     bool use(Entity &entity, Context &context) {
-        // if(item->equippable) {
-        //     _owner->equipment->toggle_equipment(item);
-        //     return false;
-        // }
+        if(entity_has_component<Equippable>(entity)) {
+            auto &equipment = get_equipment(entity);
+            equipment.toggle_equipment(entity);
+            return false;
+        }
 
         auto &item = get_item(entity);
 
@@ -770,6 +793,7 @@ struct Inventory {
 Inventory &get_inventory(Entity e);
 
 struct Fighter {
+    Entity owner;
     int hp;
     int hp_max;
     int defense_max;
@@ -778,24 +802,33 @@ struct Fighter {
     
     Fighter() {}
 
-    Fighter(int hp_, int defense_, int power_, int xp = 0) 
-        : hp(hp_), hp_max(hp_), defense_max(defense_), power_max(power_), xp(xp) {}
+    Fighter(Entity &owner, int hp_, int defense_, int power_, int xp = 0) 
+        : owner(owner), hp(hp_), hp_max(hp_), defense_max(defense_), power_max(power_), xp(xp) {}
 
     int max_hp() {
-        //int bonus = _owner && _owner->equipment ? _owner->equipment->max_hp_bonus() : 0;
         int bonus = 0;
+        if(entity_has_component<Equipment>(owner)) {
+            auto &eq = get_equipment(owner);
+            bonus += eq.max_hp_bonus();
+        }
         return hp_max + bonus;
     }
 
     int power() {
-        // int bonus = _owner && _owner->equipment ? _owner->equipment->power_bonus() : 0;
         int bonus = 0;
+        if(entity_has_component<Equipment>(owner)) {
+            auto &eq = get_equipment(owner);
+            bonus += eq.power_bonus();
+        }
         return power_max + bonus;
     }
 
     int defense() {
-        //int bonus = _owner && _owner->equipment ? _owner->equipment->defense_bonus() : 0;
         int bonus = 0;
+        if(entity_has_component<Equipment>(owner)) {
+            auto &eq = get_equipment(owner);
+            bonus += eq.defense_bonus();
+        }
         return defense_max + bonus;
     }
 };
@@ -947,6 +980,7 @@ Fighter fighters[MAX_ENTITIES];
 Ai ais[MAX_ENTITIES];
 Item items[MAX_ENTITIES];
 Stairs stairs[MAX_ENTITIES];
+Equippable equippables[MAX_ENTITIES];
 
 void entity_created(const uint32_t &index) {
     // Here you can decide if you want to reset or do nothing
@@ -995,6 +1029,16 @@ Item &get_item(Entity e) {
 Inventory &get_inventory(Entity e) {
     ComponentHandle c = entity_get_handle(e);
     return inventories[c.i];
+}
+
+Equippable &get_equippable(Entity &e) {
+    ComponentHandle c = entity_get_handle(e);
+    return equippables[c.i];
+}
+
+Equipment &get_equipment(Entity &e) {
+    ComponentHandle c = entity_get_handle(e);
+    return equipments[c.i];
 }
 
 bool cast_heal_entity(Entity entity, const ItemArgs &args, Context &context) {
@@ -1237,7 +1281,7 @@ void map_add_monsters(GameMap &map) {
             auto e = entity_create();
             auto c = entity_get_handle(e);
             entity_add_component(c, entity_fats, EntityFat(x, y, m.visual, m.color, m.name, true, render_priority.ENTITY ));
-            entity_add_component(c, fighters, Fighter(m.hp, m.defense, m.power, m.xp));
+            entity_add_component(c, fighters, Fighter(e, m.hp, m.defense, m.power, m.xp));
             entity_add_component(c, ais, Ai(e, BasicMonster_take_turn));           
         }
     }
@@ -1338,9 +1382,9 @@ void map_add_items(GameMap &map) {
                 item.args = { 40, 5 };
                 item.on_use = cast_lightning_bolt;
             } else if(item_blueprint.id == 4) {
-                // e->equippable = new Equippable(MAIN_HAND, 3, 0, 0);
+                entity_add_component(c, equippables, Equippable(MAIN_HAND, 3, 0, 0));
             } else if(item_blueprint.id == 5) {
-                // e->equippable = new Equippable(OFF_HAND, 0, 1, 0);
+                entity_add_component(c, equippables, Equippable(OFF_HAND, 0, 1, 0));
             } else {
                 std::string message = "No item with id; " + std::to_string(item.id);
                 engine_log(LogStatus::Warning, message);
@@ -1519,22 +1563,24 @@ void gui_render_menu(TCODConsole *con, std::string header, const std::vector<std
     TCODConsole::blit(menu, 0, 0, width, height, con, x, y, 1.0f, 0.7f);
 }
 
-void gui_render_inventory(TCODConsole *con, const std::string header, const Entity player, int inventory_width, int screen_width, int screen_height) {
+void gui_render_inventory(TCODConsole *con, const std::string header, Entity &player, int inventory_width, int screen_width, int screen_height) {
     std::vector<std::string> options;
 
     auto &player_inventory = get_inventory(player);
     if(player_inventory.items.size() == 0) {
         options.push_back("Inventory is empty.");
     } else {
+        auto &player_equipment = get_equipment(player);
         for(auto item_entity : player_inventory.items) {
             auto &item = get_item(item_entity);
-            // if(player->equipment->main_hand == item) {
-            //     options.push_back(item->item->name + " (in main hand)");
-            // } else if(player->equipment->off_hand == item) {
-            //     options.push_back(item->item->name + " (in off hand)");
-            // } else {
+
+            if(entity_equals(player_equipment.main_hand, item_entity)) {
+                options.push_back(item.name + " (in main hand)");
+            } else if(entity_equals(player_equipment.off_hand, item_entity)) {
+                options.push_back(item.name + " (in off hand)");
+            } else {
                 options.push_back(item.name);
-            //}
+            }
         }
     } 
 
@@ -1607,19 +1653,24 @@ void new_game() {
     const auto c = entity_get_handle(player_handle);
     entity_add_component(c, entity_fats, 
         EntityFat(SCREEN_WIDTH/2, SCREEN_HEIGHT/2, '@', TCODColor::white, "Player", true, render_priority.ENTITY));
-    entity_add_component(c, fighters, Fighter(100, 1, 2));
+    entity_add_component(c, fighters, Fighter(player_handle, 100, 1, 2));
     entity_add_component(c, inventories, Inventory(player_handle, 26));
     entity_add_component(c, levels, Level());
     entity_add_component(c, equipments, Equipment());
 
-    // EntityFat *e;
-    // e = new EntityFat(0, 0, '-', TCOD_sky, "Dagger", false, render_priority.ITEM);
-    // e->item = new Item();
-    // e->item->name = "Dagger";
-    // e->equippable = new Equippable(MAIN_HAND, 2, 0, 0);
-    
-    // player->inventory->add_item(e);
-    // player->equipment->toggle_equipment(e);
+    auto starting_item = entity_create();
+    const auto c_item = entity_get_handle(starting_item);
+    entity_add_component(c_item, entity_fats, EntityFat(0, 0, '-', TCOD_sky, "Dagger", false, render_priority.ITEM));
+    Item item;
+    item.name = "Dagger";
+    entity_add_component(c_item, items, item);
+    entity_add_component(c_item, equippables, Equippable(MAIN_HAND, 2, 0, 0));
+    entity_disable_component<EntityFat>(c_item);
+
+    auto &player_inventory = get_inventory(player_handle);
+    player_inventory.add_item(starting_item);
+    auto &player_equipment = get_equipment(player_handle);
+    player_equipment.toggle_equipment(starting_item);
 
     // generate map and fov
     game_map.tcod_fov_map = new TCODMap(Map_Width, Map_Height);
@@ -1931,9 +1982,11 @@ struct InventoryState : State {
                 entity_fat.y = player_fat.y;
                 player_inventory.remove(item_entity);
                 
-                // if(player->equipment->main_hand == item_entity || player->equipment->off_hand == item_entity) {
-                //     player->equipment->toggle_equipment(item_entity);
-                // }
+                auto &player_equipment = get_equipment(player_handle);
+                if(entity_equals(player_equipment.main_hand, item_entity) 
+                        || entity_equals(player_equipment.off_hand, item_entity)) {
+                    player_equipment.toggle_equipment(item_entity);
+                }
                 game_state = ENEMY_TURN;
             } else {
                 if(player_inventory.requires_target(index)) {
@@ -2116,14 +2169,15 @@ int main( int argc, char *argv[] ) {
                     next_floor(game_map);
                     break;
                 }
-                // case EventType::EquipmentChange: {
-                //     if(e.flag == 0) {
-                //         gui_log_message(TCOD_yellow, "You dequipped the %s", e.entity->item->name.c_str());
-                //     } else if(e.flag == 1) {
-                //         gui_log_message(TCOD_yellow, "You equipped the %s", e.entity->item->name.c_str());
-                //     }
-                //     break;
-                // }
+                case EventType::EquipmentChange: {
+                    auto &item = get_item(e.entity);
+                    if(e.flag == 0) {
+                        gui_log_message(TCOD_yellow, "You dequipped the %s", item.name.c_str());
+                    } else if(e.flag == 1) {
+                        gui_log_message(TCOD_yellow, "You equipped the %s", item.name.c_str());
+                    }
+                    break;
+                }
             }
         }
         _event_queue.clear();
