@@ -600,11 +600,12 @@ enum Targeting {
     Position
 };
 
-// struct Stairs {
-//     int floor;
+struct Stairs {
+    int floor;
 
-//     Stairs(int floor) : floor(floor) {} 
-// };
+    Stairs() {}
+    Stairs(int floor) : floor(floor) {} 
+};
 
 // enum EquipmentSlot {
 //     MAIN_HAND,
@@ -937,13 +938,34 @@ GameState previous_game_state = MAIN_MENU;
 Entity player_handle;
 Entity targeting_item;
 
-EntityFat entity_fats[MAX_ENTITIES];
-Fighter fighters[MAX_ENTITIES];
 Level levels[1]; // test to only give component to player
 Inventory inventories[1];  // test to only give component to player
-Equipment equipments[1];
+Equipment equipments[1];  // test to only give component to player
+
+EntityFat entity_fats[MAX_ENTITIES];
+Fighter fighters[MAX_ENTITIES];
 Ai ais[MAX_ENTITIES];
 Item items[MAX_ENTITIES];
+Stairs stairs[MAX_ENTITIES];
+
+void entity_created(const uint32_t &index) {
+    // Here you can decide if you want to reset or do nothing
+    // If all components have proper constructors this doesnt need to do anything
+    
+    // const Fighter f;
+    // fighters[index] = f;
+}
+
+void entity_removed(const uint32_t &index_to, const uint32_t &index_from) {
+    levels[index_to] = levels[index_from];
+    inventories[index_to] = inventories[index_from];
+    equipments[index_to] = equipments[index_from];
+
+    entity_fats[index_to] = entity_fats[index_from];
+    fighters[index_to] = fighters[index_from];
+    ais[index_to] = ais[index_from];
+    items[index_to] = items[index_from];
+}
 
 EntityFat &get_entityfat(Entity e) {
     ComponentHandle c = entity_get_handle(e);
@@ -1068,8 +1090,6 @@ const int Bar_width = 20;
 const int Panel_height = 7;
 const int Panel_y = SCREEN_HEIGHT - Panel_height;
 //
-
-// std::vector<EntityFat*> _entities;
 
 int map_index(int x, int y) {
     return x + Map_Width * y;
@@ -1332,16 +1352,17 @@ void map_add_items(GameMap &map) {
     }
 }
 
-// void map_add_stairs(GameMap &map) {
-//     auto &last_room = map.rooms[map.num_rooms - 1];
-//     // auto &last_room = map.rooms[0];
-//     int center_x, center_y;
-//     rect_center(last_room, center_x, center_y);
-//     EntityFat *e;
-//     e = new EntityFat(center_x, center_y, '>', TCOD_white, "Stairs", false, render_priority.STAIRS );
-//     e->stairs = new Stairs(map.level + 1);
-//     _entities.push_back(e);
-// }
+void map_add_stairs(GameMap &map) {
+    auto &last_room = map.rooms[map.num_rooms - 1];
+    // auto &last_room = map.rooms[0];
+    int center_x, center_y;
+    rect_center(last_room, center_x, center_y);
+    auto e = entity_create();
+    auto c = entity_get_handle(e);
+    entity_add_component(c, entity_fats, 
+        EntityFat(center_x, center_y, '>', TCOD_white, "Stairs", false, render_priority.STAIRS ));
+    entity_add_component(c, stairs, Stairs(map.level + 1));
+}
 
 bool entity_blocking_at(int x, int y, Entity &found_entity) {
     for(uint32_t i = 0; i < num_entities; i++) {
@@ -1581,19 +1602,6 @@ void gui_render_character_screen(TCODConsole *con, Entity player, int character_
                         con, x, y, 1.0f, 0.7f);
 }
 
-void entity_created(const uint32_t &index) {
-    // Here you can decide if you want to reset or do nothing
-    // If all components have proper constructors this doesnt need to do anything
-    
-    // const Fighter f;
-    // fighters[index] = f;
-}
-
-void entity_removed(const uint32_t &index_to, const uint32_t &index_from) {
-    entity_fats[index_to] = entity_fats[index_from];
-    fighters[index_to] = fighters[index_from];
-}
-
 void new_game() {
     player_handle = entity_create();
     const auto c = entity_get_handle(player_handle);
@@ -1626,7 +1634,7 @@ void new_game() {
     // add entities to map
     map_add_monsters(game_map);
     map_add_items(game_map);
-    // map_add_stairs(game_map);
+    map_add_stairs(game_map);
     
     game_state = PLAYER_TURN;    
 
@@ -1684,6 +1692,7 @@ struct RenderItem {
     TCODColor color;
     int gfx;
     int render_order;
+    bool override_fov = false;
 };
 
 bool entity_render_sort(const RenderItem &first, const RenderItem &second) {
@@ -1714,14 +1723,15 @@ void render_game() {
             entity_fats[i].y,
             entity_fats[i].color,
             entity_fats[i].gfx,
-            entity_fats[i].render_order
+            entity_fats[i].render_order,
+            masks[i].test(ComponentID::value<Stairs>())
         });
     });
     std::sort(render_items.begin(), render_items.end(), entity_render_sort);    
 
     for(auto &ri : render_items) {
-        if(game_map.tcod_fov_map->isInFov(ri.x, ri.y)) {
-        //if((entity->stairs && game_map.tiles[map_index(ri.x, ri.y)].explored) {
+        if((ri.override_fov && game_map.tiles[map_index(ri.x, ri.y)].explored)
+            || game_map.tcod_fov_map->isInFov(ri.x, ri.y)) {
             root_console->setDefaultForeground(ri.color);
             root_console->putChar(ri.x, ri.y, ri.gfx);
         }
@@ -1866,17 +1876,16 @@ struct GamePlay : State {
                     events_queue({ EventType::Message, Entity(), "There is nothing here to pick up.", TCOD_yellow });
                 }
             } else if(take_stairs) {
-                // for(int i = 0; i < _entities.size(); i++) {
-                //     auto entity = _entities[i];
-                //     if(player->x == entity->x && player->y == entity->y && entity->stairs) {
-                //         events_queue({ EventType::NextFloor, entity });
-                //         take_stairs = false;
-                //         break;  
-                //     }
-                // }
-                // if(take_stairs) {
-                //     events_queue({ EventType::Message, NULL, "There are no stairs here.", TCOD_yellow });
-                // }
+                entity_iterate(create_mask<EntityFat, Stairs>(), [&](const uint32_t &i) {
+                    if(player.x == entity_fats[i].x && player.y == entity_fats[i].y) {
+                        events_queue({ EventType::NextFloor, entities[i] });
+                        game_state = ENEMY_TURN;
+                        take_stairs = false;
+                    }
+                });
+                if(take_stairs) {
+                    events_queue({ EventType::Message, InvalidEntity, "There are no stairs here.", TCOD_yellow });
+                }
             }    
         } else {
             entity_iterate(create_mask<EntityFat, Fighter, Ai>(), [&](const uint32_t &i) {
@@ -1956,27 +1965,29 @@ struct InventoryState : State {
     };
 };
 
-// struct TargetingState : State {
-//     void update() override {
-//         int x = mouse.cx, y = mouse.cy;            
-//         if(mouse.lbutton_pressed) {
-//             //targeting_item->item->args.target_x
-//             targeting_item->item->args.target_x = x;
-//             targeting_item->item->args.target_y = y;
-//             Context context = Context(_entities, game_map);
-//             if(player->inventory->use(targeting_item, context)) {
-//                 game_state = ENEMY_TURN;
-//             }
-//         } else if(key.vk == TCODK_ESCAPE || mouse.rbutton_pressed) {
-//             game_state = previous_game_state;
-//             events_queue({ EventType::Message, NULL, "Targeting cancelled", TCOD_yellow });   
-//         }
-//     };
+struct TargetingState : State {
+    void update() override {
+        int x = mouse.cx, y = mouse.cy;            
+        if(mouse.lbutton_pressed) {
+            auto &item = get_item(targeting_item);
+            //targeting_item->item->args.target_x
+            item.args.target_x = x;
+            item.args.target_y = y;
+            Context context = Context(game_map);
+            auto &player_inventory = get_inventory(player_handle);
+            if(player_inventory.use(targeting_item, context)) {
+                game_state = ENEMY_TURN;
+            }
+        } else if(key.vk == TCODK_ESCAPE || mouse.rbutton_pressed) {
+            game_state = previous_game_state;
+            events_queue({ EventType::Message, InvalidEntity, "Targeting cancelled", TCOD_yellow });   
+        }
+    };
 
-//     void render() override {
-//         render_game();
-//     };
-// };
+    void render() override {
+        render_game();
+    };
+};
 
 struct LevelUpState : State {
     void update() override {
@@ -2035,7 +2046,7 @@ int main( int argc, char *argv[] ) {
     states.insert({ ENEMY_TURN, game_play });
     states.insert({ PLAYER_DEAD, new PlayerDead() });
     states.insert({ SHOW_INVENTORY , new InventoryState() });
-    // states.insert({ TARGETING, new TargetingState() });
+    states.insert({ TARGETING, new TargetingState() });
     states.insert({ LEVEL_UP, new LevelUpState() });
     states.insert({ CHARACTER_SCREEN, new CharacterScreenState() });
 
