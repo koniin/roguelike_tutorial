@@ -530,9 +530,7 @@ struct GameMap {
     int level = 1;
 };
 
-// struct Movement {
-//     int x, y;
-// };
+void move_towards(const GameMap &map, int &x, int &y, const int target_x, const int target_y);
 
 struct RenderPriority {
     // lower is lower prio
@@ -814,32 +812,37 @@ void attack(Entity attacker_e, Entity defender_e) {
         events_queue({ EventType::Message, attacker_e, buffer, TCOD_light_grey });
     }
 }
-// struct Ai {
-//     virtual void take_turn(EntityFat *target, GameMap &map) = 0;
-// };
+struct Ai {
+    Entity _owner;
+    std::function<void(Entity &owner, Entity &target, GameMap &map)> on_take_turn;
+    void take_turn(Entity &target, GameMap &map) {
+        on_take_turn(_owner, target, map);
+    }
 
+    Ai() {}
+    Ai(Entity _owner, std::function<void(Entity &owner, Entity &target, GameMap &map)> on_take_turn) :
+        _owner(_owner), on_take_turn(on_take_turn) {}
+};
+Ai &get_ai(Entity &e);
 
-// struct BasicMonster : Ai {
-//     EntityFat *_owner;
-//     void take_turn(EntityFat *target, GameMap &map) override {
-//         if(map.tcod_fov_map->isInFov(_owner->x, _owner->y)) {
-//             if(distance_to(_owner->x, _owner->y, target->x, target->y) >= 2.0f) {
+    void BasicMonster_take_turn(Entity &_owner, Entity &target, GameMap &map) {
+        auto &entity_fat = get_entityfat(_owner);
+        if(map.tcod_fov_map->isInFov(entity_fat.x, entity_fat.y)) {
+            auto &target_fat = get_entityfat(target);
+            auto &target_fighter = get_fighter(target);
+            if(distance_to(entity_fat.x, entity_fat.y, target_fat.x, target_fat.y) >= 2.0f) {
 
-//                 // CAN REPLACE HITS WITH ASTAR MOVEMENT
+                // CAN REPLACE HITS WITH ASTAR MOVEMENT
 
-//                 move_towards(map, _owner, target->x, target->y);
-//             } else if(target->fighter->hp > 0) {
-//                 _owner->fighter->attack(target);
-//                 //printf("Deal damage to %s.\n", target->name);
-//             }
+                move_towards(map, entity_fat.x, entity_fat.y, target_fat.x, target_fat.y);
+            } else if(target_fighter.hp > 0) {
+                attack(_owner, target);
+                //printf("Deal damage to %s.\n", target->name);
+            }
 
-//         }
-//     }
+        }
+    }
 
-//     BasicMonster(EntityFat *owner) {
-//         _owner = owner;
-//     }
-// };
 
 // struct ConfusedMonster : Ai {
 //     EntityFat *_owner;
@@ -981,6 +984,7 @@ GameState previous_game_state = MAIN_MENU;
 EntityFat entity_fats[MAX_ENTITIES];
 Fighter fighters[MAX_ENTITIES];
 Level levels[1]; // test to only give component to player
+Ai ais[MAX_ENTITIES];
 
 EntityFat &get_entityfat(Entity e) {
     ComponentHandle c = entity_get_handle(e);
@@ -995,6 +999,11 @@ Fighter &get_fighter(Entity e) {
 Level &get_level(Entity e) {
     ComponentHandle c = entity_get_handle(e);
     return levels[c.i];
+}
+
+Ai &get_ai(Entity &e) {
+    ComponentHandle c = entity_get_handle(e);
+    return ais[c.i];
 }
 
 // UI
@@ -1152,7 +1161,7 @@ void map_add_monsters(GameMap &map) {
             auto c = entity_get_handle(e);
             entity_add_component(c, entity_fats, EntityFat(x, y, m.visual, m.color, m.name, true, render_priority.ENTITY ));
             entity_add_component(c, fighters, Fighter(m.hp, m.defense, m.power, m.xp));
-            
+            entity_add_component(c, ais, Ai(e, BasicMonster_take_turn));
             
             //e->ai = new BasicMonster(e);
             //_entities.push_back(e);            
@@ -1821,6 +1830,11 @@ struct GamePlay : State {
                 // }
             }    
         } else {
+            entity_iterate(create_mask<EntityFat, Fighter, Ai>(), [&](const uint32_t &i) {
+                if(!entity_equals(entities[i], player_handle)) {
+                    ais[i].take_turn(player_handle, game_map);
+                }
+            });
             // for(int i = 1; i < _entities.size(); i++) {
             //     const auto entity = _entities[i];
             //     if(!entity->marked_for_deletion && entity->ai) {
@@ -1983,7 +1997,6 @@ int main( int argc, char *argv[] ) {
                     break;
                 }
                 case EventType::EntityDead: {
-                    // shitty way to know if player died
                     if(entity_equals(e.entity, player_handle)) {
                         auto &player = get_entityfat(e.entity);
                         
