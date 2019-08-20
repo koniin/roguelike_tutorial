@@ -73,7 +73,7 @@ ComponentMask masks[MAX_ENTITIES];
 std::function<void(const uint32_t &index)> on_entity_created;
 std::function<void(const uint32_t &index, const uint32_t &new_index)> on_entity_removed;
 
-bool entity_equals(const Entity &first, const Entity &second) {
+inline bool entity_equals(const Entity &first, const Entity &second) {
     return first.id == second.id && first.generation == second.generation;
 }
 
@@ -957,9 +957,9 @@ void entity_created(const uint32_t &index) {
 }
 
 void entity_removed(const uint32_t &index_to, const uint32_t &index_from) {
-    levels[index_to] = levels[index_from];
-    inventories[index_to] = inventories[index_from];
-    equipments[index_to] = equipments[index_from];
+    // levels[index_to] = levels[index_from];
+    // inventories[index_to] = inventories[index_from];
+    // equipments[index_to] = equipments[index_from];
 
     entity_fats[index_to] = entity_fats[index_from];
     fighters[index_to] = fighters[index_from];
@@ -1354,7 +1354,7 @@ void map_add_items(GameMap &map) {
 
 void map_add_stairs(GameMap &map) {
     auto &last_room = map.rooms[map.num_rooms - 1];
-    // auto &last_room = map.rooms[0];
+    //auto &last_room = map.rooms[0];
     int center_x, center_y;
     rect_center(last_room, center_x, center_y);
     auto e = entity_create();
@@ -1644,46 +1644,53 @@ void new_game() {
 void next_floor(GameMap &map) {
     map.level += 1;
     
-    // for(int i = 1; i < _entities.size(); i++) {
-    //     if(_entities[i] != player)
-    //         delete _entities[i];
-    // }
-    // _entities.erase(_entities.begin(), _entities.end());
-    // _entities.push_back(player);
+    std::vector<Entity> _entities_to_remove;
 
-    // game_map.rooms.clear();
-    // game_map.num_rooms = 0;
-    // delete game_map.tcod_fov_map;
+    for(size_t i = 1; i < num_entities; i++) {
+        if(!entity_equals(player_handle, entities[i])) {
+            _entities_to_remove.push_back(entities[i]);
+        }
+    }
+
+    for(auto e : _entities_to_remove) {
+        entity_remove(e);
+    }
+    
+    game_map.rooms.clear();
+    game_map.num_rooms = 0;
+    delete game_map.tcod_fov_map;
 
     targeting_item = InvalidEntity;
     
-    // Tile t_base;
-    // for(int x = 0; x < Map_Width; x++) {
-    //     for(int y = 0; y < Map_Height; y++) {
-    //         game_map.tiles[map_index(x, y)] = t_base;   
-    //     }    
-    // }
+    Tile t_base;
+    for(int x = 0; x < Map_Width; x++) {
+        for(int y = 0; y < Map_Height; y++) {
+            game_map.tiles[map_index(x, y)] = t_base;   
+        }    
+    }
 
-    // // generate map and fov
-    // game_map.tcod_fov_map = new TCODMap(Map_Width, Map_Height);
-    // // Should separate fov from map_generate (make_room)
-    // map_generate(game_map, Max_rooms, Room_min_size, Room_max_size, Map_Width, Map_Height);
+    // generate map and fov
+    game_map.tcod_fov_map = new TCODMap(Map_Width, Map_Height);
+    // Should separate fov from map_generate (make_room)
+    map_generate(game_map, Max_rooms, Room_min_size, Room_max_size, Map_Width, Map_Height);
     
-    // // Place player in first room
-    // rect_center(game_map.rooms[0], player->x, player->y);
-    // // Setup fov from players position
-    // game_map.tcod_fov_map->computeFov(player->x, player->y, fov_radius, fov_light_walls, fov_algorithm);
+    auto &player_fat = get_entityfat(player_handle);
+    // Place player in first room
+    rect_center(game_map.rooms[0], player_fat.x, player_fat.y);
+    // Setup fov from players position
+    game_map.tcod_fov_map->computeFov(player_fat.x, player_fat.y, fov_radius, fov_light_walls, fov_algorithm);
 
-    // // add entities to map
-    // map_add_monsters(game_map);
-    // map_add_items(game_map);
-    // map_add_stairs(game_map);
+    // add entities to map
+    map_add_monsters(game_map);
+    map_add_items(game_map);
+    map_add_stairs(game_map);
     
-    // game_state = PLAYER_TURN;
+    game_state = PLAYER_TURN;
 
-    // player->fighter->heal(player->fighter->hp_max / 2);
+    auto &player_fighter = get_fighter(player_handle);
+    heal(player_fighter, player_fighter.hp_max / 2);
 
-    // events_queue({ EventType::Message, NULL, "You take a moment to rest, and recover your strength." });
+    events_queue({ EventType::Message, InvalidEntity, "You take a moment to rest, and recover your strength." });
 }
 
 struct RenderItem {
@@ -1737,15 +1744,6 @@ void render_game() {
         }
     }
 
-    // for(int i = 0; i < _entities.size(); i++) {
-    //     const auto entity = _entities[i];
-    //     if((entity->stairs && game_map.tiles[map_index(entity->x, entity->y)].explored) 
-    //         || game_map.tcod_fov_map->isInFov(entity->x, entity->y)) {
-    //         root_console->setDefaultForeground(entity->color);
-    //         root_console->putChar(entity->x, entity->y, entity->gfx);
-    //     }
-    // }
-    
     bar->setDefaultBackground(TCODColor::black);
     bar->clear();
 
@@ -2114,10 +2112,10 @@ int main( int argc, char *argv[] ) {
                     entity_disable_component<EntityFat>(c);
                     break;
                 }
-                // case EventType::NextFloor: {
-                //     next_floor(game_map);
-                //     break;
-                // }
+                case EventType::NextFloor: {
+                    next_floor(game_map);
+                    break;
+                }
                 // case EventType::EquipmentChange: {
                 //     if(e.flag == 0) {
                 //         gui_log_message(TCOD_yellow, "You dequipped the %s", e.entity->item->name.c_str());
