@@ -10,6 +10,14 @@
 // http://rogueliketutorials.com/tutorials/tcod/part-13/
 // http://www.roguebasin.com/index.php?title=Complete_roguelike_tutorial_using_C%2B%2B_and_libtcod_-_part_10.1:_persistence
 
+/// Goals
+// - make it work (with current setup)
+// - better events (typed)
+// - make a simpler iteration function
+// - make systems
+// - discrepancy between where events are queued 
+//    - look at fighter, heal, attack and take_damage all have messages associated but are triggered in different ways
+
 // ECS Improvements
 // - easier to get a reference/pointer to component
     /* 
@@ -68,6 +76,8 @@ std::function<void(const uint32_t &index, const uint32_t &new_index)> on_entity_
 bool entity_equals(const Entity &first, const Entity &second) {
     return first.id == second.id && first.generation == second.generation;
 }
+
+const Entity InvalidEntity = Entity { 0, 0 };
 
 Entity entity_create() {
     // CHECK IF ID IS IN ANY QUEUE
@@ -144,6 +154,21 @@ void entity_remove_component(const ComponentHandle &ch, size_t component_id) {
     masks[ch.i].reset(component_id);
 }
 
+template<typename Component>
+void entity_remove_component(const ComponentHandle &ch) {
+    masks[ch.i].reset(ComponentID::value<Component>());
+}
+
+template<typename Component>
+void entity_disable_component(const ComponentHandle &ch) {
+    masks[ch.i].reset(ComponentID::value<Component>());
+}
+
+template<typename Component>
+void entity_enable_component(const ComponentHandle &ch) {
+    masks[ch.i].set(ComponentID::value<Component>());
+}
+
 template <typename C>
 ComponentMask create_mask() {
     ComponentMask mask;
@@ -156,7 +181,7 @@ ComponentMask create_mask() {
     return create_mask<C1>() | create_mask<C2, Components ...>();
 }
 
-void entity_iterate(const ComponentMask &system_mask, std::function<void(uint32_t &index)> f) {
+inline void entity_iterate(const ComponentMask &system_mask, std::function<void(uint32_t &index)> f) {
     for(uint32_t i = 0; i < num_entities; i++) {
         if((masks[i] & system_mask) == system_mask) {
             f(i);
@@ -556,28 +581,24 @@ struct EntityFat {
 
 EntityFat &get_entityfat(Entity e);
 
-// void move_towards(const GameMap &map, EntityFat *entity, int target_x, int target_y);
+struct ItemArgs {
+    int amount = 0;
+    float range = 0.0f;
+    Entity target;
+    int target_x = 0;
+    int target_y = 0;
+};
 
-// struct ItemArgs {
-//     int amount = 0;
-//     float range = 0.0f;
-//     EntityFat *target = NULL;
-//     int target_x = 0;
-//     int target_y = 0;
-// };
+struct Context {
+    GameMap &map;
 
-// struct Context {
-//     std::vector<EntityFat *> &entities;
-//     GameMap &map;
+    Context(GameMap &map) : map(map) {}
+};
 
-//     Context(std::vector<EntityFat *> &entities, GameMap &map) :
-//         entities(entities), map(map) {}
-// };
-
-// enum Targeting {
-//     None,
-//     Position
-// };
+enum Targeting {
+    None,
+    Position
+};
 
 // struct Stairs {
 //     int floor;
@@ -599,143 +620,153 @@ EntityFat &get_entityfat(Entity e);
 //         : slot(slot), power_bonus(power_bonus), defense_bonus(defense_bonus), max_hp_bonus(max_hp_bonus)
 //         {}
 // };
-// struct Equipment {
-//     EntityFat *main_hand = NULL;
-//     EntityFat *off_hand = NULL;
 
-//     int max_hp_bonus() {
-//         int bonus = 0;
-//         bonus += (main_hand && main_hand->equippable) ? main_hand->equippable->max_hp_bonus : 0;
-//         bonus += (off_hand && off_hand->equippable) ? off_hand->equippable->max_hp_bonus : 0;
-//         return bonus;
-//     }
+struct Equipment {
+    /* 
+    EntityFat *main_hand = NULL;
+    EntityFat *off_hand = NULL;
 
-//     int power_bonus() {
-//         int bonus = 0;
-//         bonus += (main_hand && main_hand->equippable) ? main_hand->equippable->power_bonus : 0;
-//         bonus += (off_hand && off_hand->equippable) ? off_hand->equippable->power_bonus : 0;
-//         return bonus;
-//     }
+    int max_hp_bonus() {
+        int bonus = 0;
+        bonus += (main_hand && main_hand->equippable) ? main_hand->equippable->max_hp_bonus : 0;
+        bonus += (off_hand && off_hand->equippable) ? off_hand->equippable->max_hp_bonus : 0;
+        return bonus;
+    }
 
-//     int defense_bonus() {
-//         int bonus = 0;
-//         bonus += (main_hand && main_hand->equippable) ? main_hand->equippable->defense_bonus : 0;
-//         bonus += (off_hand && off_hand->equippable) ? off_hand->equippable->defense_bonus : 0;
-//         return bonus;
-//     }
+    int power_bonus() {
+        int bonus = 0;
+        bonus += (main_hand && main_hand->equippable) ? main_hand->equippable->power_bonus : 0;
+        bonus += (off_hand && off_hand->equippable) ? off_hand->equippable->power_bonus : 0;
+        return bonus;
+    }
 
-//     void toggle_equipment(EntityFat *equippable_entity) {
-//         auto slot = equippable_entity->equippable->slot;
+    int defense_bonus() {
+        int bonus = 0;
+        bonus += (main_hand && main_hand->equippable) ? main_hand->equippable->defense_bonus : 0;
+        bonus += (off_hand && off_hand->equippable) ? off_hand->equippable->defense_bonus : 0;
+        return bonus;
+    }
 
-//         if(slot == MAIN_HAND) {
-//             if(main_hand == equippable_entity) {
-//                 events_queue({ EventType::EquipmentChange, equippable_entity, "", TCOD_amber, 0 });
-//                 main_hand = NULL;
-//             } else {
-//                 if(main_hand) {
-//                     events_queue({ EventType::EquipmentChange, main_hand, "", TCOD_amber, 0 });
-//                 }
-//                 main_hand = equippable_entity;
-//                 events_queue({ EventType::EquipmentChange, equippable_entity, "", TCOD_amber, 1 });
-//             }
-//         } else if(slot == OFF_HAND) {
-//             if(off_hand == equippable_entity) {
-//                 events_queue({ EventType::EquipmentChange, equippable_entity, "", TCOD_amber, 0 });
-//                 off_hand = NULL;
-//             } else {
-//                 if(off_hand) {
-//                     events_queue({ EventType::EquipmentChange, off_hand, "", TCOD_amber, 0 });
-//                 }
-//                 off_hand = equippable_entity;
-//                 events_queue({ EventType::EquipmentChange, equippable_entity, "", TCOD_amber, 1 });
-//             }
-//         } else {
-//             engine_log(LogStatus::Warning, "Equipment slot is not implemented " + std::to_string(slot));
-//         }
-//     }
-// };
+    void toggle_equipment(EntityFat *equippable_entity) {
+        auto slot = equippable_entity->equippable->slot;
 
-// struct Item {
-//     int id;
-//     std::string name;
-//     std::function<bool(EntityFat* entity, const ItemArgs &args, Context &context)> on_use = NULL;
-//     ItemArgs args;
-//     Targeting targeting = Targeting::None;
-//     std::string targeting_message = "";
-// };
+        if(slot == MAIN_HAND) {
+            if(main_hand == equippable_entity) {
+                events_queue({ EventType::EquipmentChange, equippable_entity, "", TCOD_amber, 0 });
+                main_hand = NULL;
+            } else {
+                if(main_hand) {
+                    events_queue({ EventType::EquipmentChange, main_hand, "", TCOD_amber, 0 });
+                }
+                main_hand = equippable_entity;
+                events_queue({ EventType::EquipmentChange, equippable_entity, "", TCOD_amber, 1 });
+            }
+        } else if(slot == OFF_HAND) {
+            if(off_hand == equippable_entity) {
+                events_queue({ EventType::EquipmentChange, equippable_entity, "", TCOD_amber, 0 });
+                off_hand = NULL;
+            } else {
+                if(off_hand) {
+                    events_queue({ EventType::EquipmentChange, off_hand, "", TCOD_amber, 0 });
+                }
+                off_hand = equippable_entity;
+                events_queue({ EventType::EquipmentChange, equippable_entity, "", TCOD_amber, 1 });
+            }
+        } else {
+            engine_log(LogStatus::Warning, "Equipment slot is not implemented " + std::to_string(slot));
+        }
+    }
+    */
+};
 
-// struct Inventory {
-//     EntityFat *_owner;
-//     std::vector<EntityFat*> items;
-//     int capacity;
-//     Inventory(EntityFat *owner, int capacity) : _owner(owner), capacity(capacity) {}
+struct Item {
+    int id;
+    std::string name;
+    std::function<bool(Entity entity, const ItemArgs &args, Context &context)> on_use = NULL;
+    ItemArgs args;
+    Targeting targeting = Targeting::None;
+    std::string targeting_message = "";
+};
 
-//     int _dirty_shit = 0;
+Item &get_item(Entity e);
 
-//     bool add_item(EntityFat *item) {
-//         if(items.size() >= capacity) {
-//             return false;
-//         } 
-//         items.push_back(item);
-//         return true;
-//     }
+struct Inventory {
+    Entity _owner;
+    std::vector<Entity> items;
+    size_t capacity;
+    Inventory() {}
+    Inventory(Entity owner, size_t capacity) : _owner(owner), capacity(capacity) {}
 
-//     bool use(size_t index, Context &context) {
-//         return use(items[index], context);
-//     }
+    int _dirty_shit = 0;
 
-//     bool use(EntityFat *item, Context &context) {
-//         if(item->equippable) {
-//             _owner->equipment->toggle_equipment(item);
-//             return false;
-//         }
+    bool add_item(Entity  item) {
+        if(items.size() >= capacity) {
+            return false;
+        } 
+        items.push_back(item);
+        return true;
+    }
 
-//         if(!item->item->on_use) {    
-//             std::string msg = "The " + item->item->name + " cannot be used.";
-//             events_queue({ EventType::Message, NULL, msg, TCOD_yellow});
-//             return false;
-//         }
+    bool use(size_t index, Context &context) {
+        return use(items[index], context);
+    }
 
-//         if(requires_target(item)) {
-//             return false;
-//         }
+    bool use(Entity &entity, Context &context) {
+        // if(item->equippable) {
+        //     _owner->equipment->toggle_equipment(item);
+        //     return false;
+        // }
 
-//         bool consumed = item->item->on_use(_owner, item->item->args, context);
-//         remove(item);
-//         delete item; // Shitty memory handling
-//         return true;
-//     }
+        auto &item = get_item(entity);
+
+        if(!item.on_use) {    
+            std::string msg = "The " + item.name + " cannot be used.";
+            events_queue({ EventType::Message, Entity(), msg, TCOD_yellow});
+            return false;
+        }
+
+        if(requires_target(entity)) {
+            return false;
+        }
+
+        bool consumed = item.on_use(_owner, item.args, context);
+        remove(entity);
+        return true;
+    }
     
-//     bool requires_target(size_t index) {
-//         return requires_target(items[index]);
-//     }
+    bool requires_target(size_t index) {
+        return requires_target(items[index]);
+    }
 
-//     bool requires_target(EntityFat *item) {    
-//         if(item->item->targeting == Targeting::None) {
-//             return false;
-//         }
-//         if(item->item->targeting != Targeting::None && !(item->item->args.target_x || item->item->args.target_y)) {
-//             return true;
-//         }
-//         return false;
-//     }
+    bool requires_target(Entity &entity) {    
+        auto &item = get_item(entity);
+        if(item.targeting == Targeting::None) {
+            return false;
+        }
+        if(item.targeting != Targeting::None && !(item.args.target_x || item.args.target_y)) {
+            return true;
+        }
+        return false;
+    }
 
-//     void remove(EntityFat *item) {
-//         int delete_count = 0;
-//         int index = 0;
-//         for(auto &i : items) {
-//             if(i == item) { 
-//                 delete_count++;
-//                 break;
-//             }
-//             index++;
-//         }
-//         if(delete_count == 0) {
-//             engine_log(LogStatus::Error, "NO ITEM REMOVED WHEN PICKED UP! (Inventory::remove)");
-//         }
-//         items.erase(items.begin() + index);
-//     }
-// };
+    void remove(Entity &item) {
+        int delete_count = 0;
+        int index = 0;
+        for(auto &i : items) {
+            if(entity_equals(i, item)) {
+                delete_count++;
+                break;
+            }
+            index++;
+        }
+        if(delete_count == 0) {
+            engine_log(LogStatus::Error, "NO ITEM REMOVED WHEN PICKED UP! (Inventory::remove)");
+        }
+        items.erase(items.begin() + index);
+    }
+};
+
+Inventory &get_inventory(Entity e);
 
 struct Fighter {
     int hp;
@@ -749,10 +780,11 @@ struct Fighter {
     Fighter(int hp_, int defense_, int power_, int xp = 0) 
         : hp(hp_), hp_max(hp_), defense_max(defense_), power_max(power_), xp(xp) {}
 
-    // // int max_hp() {
-    // //     int bonus = _owner && _owner->equipment ? _owner->equipment->max_hp_bonus() : 0;
-    // //     return hp_max + bonus;
-    // // }
+    int max_hp() {
+        //int bonus = _owner && _owner->equipment ? _owner->equipment->max_hp_bonus() : 0;
+        int bonus = 0;
+        return hp_max + bonus;
+    }
 
     int power() {
         // int bonus = _owner && _owner->equipment ? _owner->equipment->power_bonus() : 0;
@@ -765,15 +797,6 @@ struct Fighter {
         int bonus = 0;
         return defense_max + bonus;
     }
-    
-
-
-    // void heal(int amount) {
-    //     hp += amount;
-    //     if(hp > hp_max) {
-    //         hp = hp_max;
-    //     }
-    // }
 };
 
 Fighter &get_fighter(Entity e);
@@ -782,6 +805,7 @@ void take_damage(Entity entity, int amount) {
     Fighter &f = get_fighter(entity);
     f.hp -= amount;
     if(f.hp <= 0) {
+        f.hp = 0;
         events_queue({ EventType::EntityDead, entity });
     }
 }
@@ -812,63 +836,69 @@ void attack(Entity attacker_e, Entity defender_e) {
         events_queue({ EventType::Message, attacker_e, buffer, TCOD_light_grey });
     }
 }
+
+void heal(Fighter &f, int amount) {
+    f.hp += amount;
+    if(f.hp > f.hp_max) {
+        f.hp = f.hp_max;
+    }
+}
+
+struct AiContext {
+    std::function<void(Entity &owner, Entity &target, GameMap &map, AiContext &context)> secondary;
+    int counter = 0;
+};
+
 struct Ai {
+    AiContext context;
     Entity _owner;
-    std::function<void(Entity &owner, Entity &target, GameMap &map)> on_take_turn;
+    std::function<void(Entity &owner, Entity &target, GameMap &map, AiContext &context)> on_take_turn;
     void take_turn(Entity &target, GameMap &map) {
-        on_take_turn(_owner, target, map);
+        on_take_turn(_owner, target, map, context);
     }
 
     Ai() {}
-    Ai(Entity _owner, std::function<void(Entity &owner, Entity &target, GameMap &map)> on_take_turn) :
+    Ai(Entity _owner, std::function<void(Entity &owner, Entity &target, GameMap &map, AiContext &context)> on_take_turn) :
         _owner(_owner), on_take_turn(on_take_turn) {}
 };
 Ai &get_ai(Entity &e);
 
-    void BasicMonster_take_turn(Entity &_owner, Entity &target, GameMap &map) {
-        auto &entity_fat = get_entityfat(_owner);
-        if(map.tcod_fov_map->isInFov(entity_fat.x, entity_fat.y)) {
-            auto &target_fat = get_entityfat(target);
-            auto &target_fighter = get_fighter(target);
-            if(distance_to(entity_fat.x, entity_fat.y, target_fat.x, target_fat.y) >= 2.0f) {
+void BasicMonster_take_turn(Entity &_owner, Entity &target, GameMap &map, AiContext &context) {
+    auto &entity_fat = get_entityfat(_owner);
+    if(map.tcod_fov_map->isInFov(entity_fat.x, entity_fat.y)) {
+        auto &target_fat = get_entityfat(target);
+        auto &target_fighter = get_fighter(target);
+        if(distance_to(entity_fat.x, entity_fat.y, target_fat.x, target_fat.y) >= 2.0f) {
 
-                // CAN REPLACE HITS WITH ASTAR MOVEMENT
+            // CAN REPLACE HITS WITH ASTAR MOVEMENT
 
-                move_towards(map, entity_fat.x, entity_fat.y, target_fat.x, target_fat.y);
-            } else if(target_fighter.hp > 0) {
-                attack(_owner, target);
-                //printf("Deal damage to %s.\n", target->name);
-            }
-
+            move_towards(map, entity_fat.x, entity_fat.y, target_fat.x, target_fat.y);
+        } else if(target_fighter.hp > 0) {
+            attack(_owner, target);
         }
     }
+}
 
+void ConfusedMonster_take_turn(Entity &owner, Entity &target, GameMap &map, AiContext &context) {
+    if(context.counter > 0) {
+        context.counter--;
 
-// struct ConfusedMonster : Ai {
-//     EntityFat *_owner;
-//     Ai *previous;
-//     int turns_remaining;
-//     void take_turn(EntityFat *target, GameMap &map) override {
-//         if(turns_remaining > 0) {
-//             turns_remaining--;
+        auto &entity_fat = get_entityfat(target);
+        int rx = entity_fat.x + rand_int(0, 2) - 1;
+        int ry = entity_fat.y + rand_int(0, 2) - 1;
 
-//             int rx = _owner->x + rand_int(0, 2) - 1;
-//             int ry = _owner->y + rand_int(0, 2) - 1;
-
-//             if(rx != _owner->x && ry != _owner->y) {
-//                 move_towards(map, _owner, rx, ry);
-//             }
-//         } else {
-//             std::string msg = "The " + _owner->name + " is no longer confused!";
-//             events_queue({ EventType::Message, NULL, msg, TCOD_red });
-
-//             _owner->ai = previous;
-//         }
-//     }
-
-//     ConfusedMonster(EntityFat *owner, Ai *previous, int turns) 
-//         : _owner(owner), previous(previous), turns_remaining(turns) {}
-// };
+        if(rx != entity_fat.x && ry != entity_fat.y) {
+            move_towards(map, entity_fat.x, entity_fat.y, rx, ry);
+        }
+    } else {
+        auto &entity_fat = get_entityfat(target);
+        std::string msg = "The " + entity_fat.name + " is no longer confused!";
+        events_queue({ EventType::Message, InvalidEntity, msg, TCOD_red });
+        
+        Ai &ai = get_ai(target);
+        ai.on_take_turn = context.secondary;
+    }
+}
 
 struct Level {
     int current_level;
@@ -899,92 +929,21 @@ struct Level {
 
 Level &get_level(Entity e);
 
-// bool cast_heal_entity(EntityFat *entity, const ItemArgs &args, Context &context) {
-//     if(entity->fighter->hp == entity->fighter->hp_max) {
-//         events_queue({ EventType::Message, NULL, "You are already at full health", TCOD_yellow });
-//         return false;
-//     } 
-//     entity->fighter->heal(args.amount);
-//     events_queue({ EventType::Message, NULL, "Your wounds start to feel better!", TCOD_green });
-//     return true;
-// }
-
-// bool cast_lightning_bolt(EntityFat *caster, const ItemArgs &args, Context &context) {
-//     EntityFat *closest = NULL;
-//     float closest_distance = 1000000.f;
-//     for(auto &e : context.entities) {
-//         if(e->fighter && e != caster && context.map.tcod_fov_map->isInFov(e->x, e->y)) {
-//             float distance = distance_to(caster->x, caster->y, e->x, e->y);
-//             if(distance < closest_distance) {
-//                 closest = e;
-//                 closest_distance = distance;
-//             }
-//         }
-//     }
-
-//     if(closest) {
-//         closest->fighter->take_damage(args.amount);
-//         std::string msg = "A lighting bolt strikes the " + closest->name + " with a loud thunder! \nThe damage is " + std::to_string(args.amount);
-//         events_queue({ EventType::Message, NULL, msg, TCOD_amber });
-//         return true;
-//     } else {
-//         events_queue({ EventType::Message, NULL, "No enemy is close enough to strike.", TCOD_red });
-//         return false;
-//     }
-// }
-
-// bool cast_fireball(EntityFat *caster, const ItemArgs &args, Context &context) {
-//     if(!context.map.tcod_fov_map->isInFov(args.target_x, args.target_y)) {
-//         events_queue({ EventType::Message, NULL, "You cannot target a tile outside your field of view.", TCOD_yellow });
-//         return false;
-//     }
-
-//     std::string msg = "The fireball explodes, burning everything within " + std::to_string(args.range) + " tiles!";
-//     events_queue({ EventType::Message, NULL, msg, TCOD_orange });
-
-//     for(auto &e : context.entities) {
-//         if(e->fighter && distance_to(e->x, e->y, args.target_x, args.target_y) <= args.range) {
-//             msg = "The " + e->name + " gets burned for " + std::to_string(args.amount) + " hit points.";
-//             events_queue({ EventType::Message, NULL, msg, TCOD_orange });
-//             e->fighter->take_damage(args.amount);
-//         }
-//     }
-
-//     return true;
-// }
-
-// bool cast_confuse(EntityFat *caster, const ItemArgs &args, Context &context) {
-//     if(!context.map.tcod_fov_map->isInFov(args.target_x, args.target_y)) {
-//         events_queue({ EventType::Message, NULL, "You cannot target a tile outside your field of view.", TCOD_yellow });
-//         return false;
-//     }
-
-//     for(auto &e : context.entities) {
-//         if(e->ai && e->x == args.target_x &&  e->y == args.target_y) {
-//             std::string msg = "The eyes of the " + e->name + " looks vacant as it starts to stumble around!";
-//             events_queue({ EventType::Message, NULL, msg, TCOD_light_green });
-//             e->ai = new ConfusedMonster(e, e->ai, 10);
-//             return true;
-//         }
-//     }
-
-//     std::string msg = "There is no targetable entity at that location.";
-//     events_queue({ EventType::Message, NULL, msg, TCOD_yellow });
-//     return false;
-// }
-
 
 GameMap game_map;
 
-// EntityFat *player;
 GameState game_state = MAIN_MENU;
 GameState previous_game_state = MAIN_MENU;
-// EntityFat *targeting_item = NULL;
+Entity player_handle;
+Entity targeting_item;
 
 EntityFat entity_fats[MAX_ENTITIES];
 Fighter fighters[MAX_ENTITIES];
 Level levels[1]; // test to only give component to player
+Inventory inventories[1];  // test to only give component to player
+Equipment equipments[1];
 Ai ais[MAX_ENTITIES];
+Item items[MAX_ENTITIES];
 
 EntityFat &get_entityfat(Entity e) {
     ComponentHandle c = entity_get_handle(e);
@@ -1004,6 +963,104 @@ Level &get_level(Entity e) {
 Ai &get_ai(Entity &e) {
     ComponentHandle c = entity_get_handle(e);
     return ais[c.i];
+}
+
+Item &get_item(Entity e) {
+    ComponentHandle c = entity_get_handle(e);
+    return items[c.i];
+}
+
+Inventory &get_inventory(Entity e) {
+    ComponentHandle c = entity_get_handle(e);
+    return inventories[c.i];
+}
+
+bool cast_heal_entity(Entity entity, const ItemArgs &args, Context &context) {
+    auto &fighter = get_fighter(entity);
+    if(fighter.hp == fighter.hp_max) {
+        events_queue({ EventType::Message, InvalidEntity, "You are already at full health", TCOD_yellow });
+        return false;
+    } 
+    heal(fighter, args.amount);
+    events_queue({ EventType::Message, InvalidEntity, "Your wounds start to feel better!", TCOD_green });
+    return true;
+}
+
+bool cast_lightning_bolt(Entity caster, const ItemArgs &args, Context &context) {
+    Entity closest = InvalidEntity;
+    float closest_distance = 1000000.f;
+    auto &caster_fat = get_entityfat(caster);
+    entity_iterate(create_mask<EntityFat, Fighter>(), [&](const uint32_t &i) {
+        EntityFat &entity_fat = entity_fats[i];
+        if(!entity_equals(caster, entities[i]) && context.map.tcod_fov_map->isInFov(entity_fat.x, entity_fat.y)) {
+            float distance = distance_to(caster_fat.x, caster_fat.y, entity_fat.x, entity_fat.y);
+            if(distance < closest_distance) {
+                closest = entities[i];
+                closest_distance = distance;
+            }
+        }
+    });
+
+    if(!entity_equals(closest, InvalidEntity)) {
+        auto &closest_fat = get_entityfat(closest);
+
+        take_damage(closest, args.amount);
+        std::string msg = "A lighting bolt strikes the " + closest_fat.name + " with a loud thunder! \nThe damage is " + std::to_string(args.amount);
+        events_queue({ EventType::Message, InvalidEntity, msg, TCOD_amber });
+        return true;
+    } else {
+        events_queue({ EventType::Message, InvalidEntity, "No enemy is close enough to strike.", TCOD_red });
+        return false;
+    }
+}
+
+bool cast_fireball(Entity caster, const ItemArgs &args, Context &context) {
+    if(!context.map.tcod_fov_map->isInFov(args.target_x, args.target_y)) {
+        events_queue({ EventType::Message, InvalidEntity, "You cannot target a tile outside your field of view.", TCOD_yellow });
+        return false;
+    }
+
+    std::string msg = "The fireball explodes, burning everything within " + std::to_string(args.range) + " tiles!";
+    events_queue({ EventType::Message, InvalidEntity, msg, TCOD_orange });
+
+    entity_iterate(create_mask<EntityFat, Fighter>(), [&](const uint32_t &i) {
+        EntityFat &entity_fat = entity_fats[i];
+
+        if(distance_to(entity_fat.x, entity_fat.y, args.target_x, args.target_y) <= args.range) {
+            msg = "The " + entity_fat.name + " gets burned for " + std::to_string(args.amount) + " hit points.";
+            events_queue({ EventType::Message, InvalidEntity, msg, TCOD_orange });
+            take_damage(entities[i], args.amount);
+        }
+    });
+
+    return true;
+}
+
+bool cast_confuse(Entity caster, const ItemArgs &args, Context &context) {
+    if(!context.map.tcod_fov_map->isInFov(args.target_x, args.target_y)) {
+        events_queue({ EventType::Message, InvalidEntity, "You cannot target a tile outside your field of view.", TCOD_yellow });
+        return false;
+    }
+
+    bool executed = false;
+    entity_iterate(create_mask<EntityFat, Ai>(), [&](const uint32_t &i) {
+        EntityFat &entity_fat = entity_fats[i];
+        if(entity_fat.x == args.target_x &&  entity_fat.y == args.target_y) {
+            std::string msg = "The eyes of the " + entity_fat.name + " looks vacant as it starts to stumble around!";
+            events_queue({ EventType::Message, InvalidEntity, msg, TCOD_light_green });
+            ais[i].context.secondary = ais[i].on_take_turn;
+            ais[i].on_take_turn = ConfusedMonster_take_turn;
+            ais[i].context.counter = 10;
+            executed = true;
+        }
+    });
+    if(executed) {
+        return true;
+    }
+
+    std::string msg = "There is no targetable entity at that location.";
+    events_queue({ EventType::Message, InvalidEntity, msg, TCOD_yellow });
+    return false;
 }
 
 // UI
@@ -1161,10 +1218,7 @@ void map_add_monsters(GameMap &map) {
             auto c = entity_get_handle(e);
             entity_add_component(c, entity_fats, EntityFat(x, y, m.visual, m.color, m.name, true, render_priority.ENTITY ));
             entity_add_component(c, fighters, Fighter(m.hp, m.defense, m.power, m.xp));
-            entity_add_component(c, ais, Ai(e, BasicMonster_take_turn));
-            
-            //e->ai = new BasicMonster(e);
-            //_entities.push_back(e);            
+            entity_add_component(c, ais, Ai(e, BasicMonster_take_turn));           
         }
     }
 }
@@ -1203,77 +1257,80 @@ std::vector<ItemBlueprint> item_data = {
     }
 };
 
-// void map_add_items(GameMap &map) {
-//     for(const Rect &room : map.rooms) {
-//         std::vector<WeightByLevel> weights = { {1, 1}, {2, 4} };
-//         int number_of_items = from_dungeon_level(weights, map.level);
-//         // int number_of_items = rand_int(0, max_items_per_room);
-//         for(int i = 0; i < number_of_items; i++) {
-//             int x = rand_int(room.x + 1, room.x2 - 1); 
-//             int y = rand_int(room.y + 1, room.y2 - 1);
+void map_add_items(GameMap &map) {
+    for(const Rect &room : map.rooms) {
+        std::vector<WeightByLevel> weights = { {1, 1}, {2, 4} };
+        int number_of_items = from_dungeon_level(weights, map.level);
+        // int number_of_items = rand_int(0, max_items_per_room);
+        for(int i = 0; i < number_of_items; i++) {
+            int x = rand_int(room.x + 1, room.x2 - 1); 
+            int y = rand_int(room.y + 1, room.y2 - 1);
 
-//             bool occupied = false;
-//             for(int ei = 0; ei < _entities.size(); ei++) {
-//                 EntityFat *e = _entities[ei];
-//                 if(e->x == x && e->y == y) {
-//                     occupied = true;
-//                     break;
-//                 }
-//             }
-//             if(occupied) {
-//                 continue;
-//             }
+            bool occupied = false;
+            for(uint32_t ei = 0; ei < num_entities; ei++) {
+                //we assume all entities have the base entity component
+                EntityFat *e = &entity_fats[ei];
+                if(e->x == x && e->y == y) {
+                    occupied = true;
+                    break;
+                }
+            }
+            if(occupied) {
+                continue;
+            }
 
-//             // We probably want some other way of generating the item etc
-//             // so this will change in the future anyway
+            // We probably want some other way of generating the item etc
+            // so this will change in the future anyway
 
-//             // Also perhaps split items into different categories
-//             // so we can select a random category or a set number from each category
-//             std::vector<int> chances;
-//             chances.reserve(item_data.size());
-//             for(auto id : item_data) {
-//                 int chance = from_dungeon_level(id.weights, map.level);
-//                 if(chance > 0) {
-//                     chances.push_back(chance);
-//                 }
-//             }
-//             auto blueprint_index = rand_weighted_index(chances.data(), chances.size());
-//             auto &item = item_data[blueprint_index];
-//             //int index = rand_weighted_index(item_weights.data(), item_weights.size());
-//             EntityFat *e;
-//             e = new EntityFat(x, y, item.visual, item.color, item.name, false, render_priority.ITEM );
-//             e->item = new Item();
-//             e->item->name = item.name;
-//             if(item.id == 0) {
-//                 e->item->args = { 40 };
-//                 e->item->on_use = cast_heal_entity;
-//             } else if(item.id == 1) {
-//                 e->item->args = { 25, 3 };
-//                 e->item->on_use = cast_fireball;
-//                 e->item->targeting = Targeting::Position;
-//                 e->item->targeting_message = "Left-click a target tile for the fireball, or right click to cancel.";
-//             } else if(item.id == 2) {
-//                 e->item->on_use = cast_confuse;
-//                 e->item->targeting = Targeting::Position;
-//                 e->item->targeting_message = "Left-click an enemy to confuse it, or right click to cancel.";
-//             } else if(item.id == 3) {
-//                 e->item->args = { 40, 5 };
-//                 e->item->on_use = cast_lightning_bolt;
-//             } else if(item.id == 4) {
-//                 e->equippable = new Equippable(MAIN_HAND, 3, 0, 0);
-//             } else if(item.id == 5) {
-//                 e->equippable = new Equippable(OFF_HAND, 0, 1, 0);
-//             } else {
-//                 delete e->item;
-//                 delete e;
-//                 std::string message = "No item with id; " + std::to_string(item.id);
-//                 engine_log(LogStatus::Warning, message);
-//                 continue;
-//             }
-//             _entities.push_back(e);
-//         }
-//     }
-// }
+            // Also perhaps split items into different categories
+            // so we can select a random category or a set number from each category
+            std::vector<int> chances;
+            chances.reserve(item_data.size());
+            for(auto id : item_data) {
+                int chance = from_dungeon_level(id.weights, map.level);
+                if(chance > 0) {
+                    chances.push_back(chance);
+                }
+            }
+            auto blueprint_index = rand_weighted_index(chances.data(), chances.size());
+            auto &item_blueprint = item_data[blueprint_index];
+            //int index = rand_weighted_index(item_weights.data(), item_weights.size());
+            auto e = entity_create();
+            auto c = entity_get_handle(e);
+            entity_add_component(c, entity_fats, 
+                EntityFat(x, y, item_blueprint.visual, item_blueprint.color, item_blueprint.name, false, render_priority.ITEM));
+            
+            Item item;
+            item.name = item_blueprint.name;
+            if(item_blueprint.id == 0) {
+                item.args = { 40 };
+                item.on_use = cast_heal_entity;
+            } else if(item_blueprint.id == 1) {
+                item.args = { 25, 3 };
+                item.on_use = cast_fireball;
+                item.targeting = Targeting::Position;
+                item.targeting_message = "Left-click a target tile for the fireball, or right click to cancel.";
+            } else if(item_blueprint.id == 2) {
+                item.on_use = cast_confuse;
+                item.targeting = Targeting::Position;
+                item.targeting_message = "Left-click an enemy to confuse it, or right click to cancel.";
+            } else if(item_blueprint.id == 3) {
+                item.args = { 40, 5 };
+                item.on_use = cast_lightning_bolt;
+            } else if(item_blueprint.id == 4) {
+                // e->equippable = new Equippable(MAIN_HAND, 3, 0, 0);
+            } else if(item_blueprint.id == 5) {
+                // e->equippable = new Equippable(OFF_HAND, 0, 1, 0);
+            } else {
+                std::string message = "No item with id; " + std::to_string(item.id);
+                engine_log(LogStatus::Warning, message);
+                entity_remove(e);
+                continue;
+            }
+            entity_add_component(c, items, item);
+        }
+    }
+}
 
 // void map_add_stairs(GameMap &map) {
 //     auto &last_room = map.rooms[map.num_rooms - 1];
@@ -1386,26 +1443,26 @@ void gui_log_message(const TCODColor &col, const char *text, ...) {
    } while ( lineEnd );
 }
 
-// void gui_render_mouse_look(TCODConsole *con, const GameMap &map, int mouse_x, int mouse_y) {
-//     if(!map.tcod_fov_map->isInFov(mouse_x, mouse_y)) {
-//         return;
-//     }
+void gui_render_mouse_look(TCODConsole *con, const GameMap &map, int mouse_x, int mouse_y) {
+    if(!map.tcod_fov_map->isInFov(mouse_x, mouse_y)) {
+        return;
+    }
 
-//     std::string name_list = "";
-//     for(size_t i = 0; i < _entities.size(); i++) {
-//         auto entity = _entities[i];
-//         if(entity->x == mouse_x && entity->y == mouse_y) {
-//             if(name_list == "") {
-//                 name_list = entity->name;
-//             } else {
-//                 name_list += ", " + entity->name;
-//             }
-//         }
-//     }
+    std::string name_list = "";
+    entity_iterate(create_mask<EntityFat>(), [&](const uint32_t &i) {
+        auto &entity_fat = entity_fats[i];
+        if(entity_fat.x == mouse_x && entity_fat.y == mouse_y) {
+            if(name_list == "") {
+                name_list = entity_fat.name;
+            } else {
+                name_list += ", " + entity_fat.name;
+            }
+        }
+    });
 
-//     con->setDefaultForeground(TCODColor::lightGrey);
-//     con->print(1, 0, name_list.c_str());
-// }
+    con->setDefaultForeground(TCODColor::lightGrey);
+    con->print(1, 0, name_list.c_str());
+}
 
 void gui_render_menu(TCODConsole *con, std::string header, const std::vector<std::string> &options, 
     int width, int screen_width, int screen_height) {
@@ -1441,24 +1498,27 @@ void gui_render_menu(TCODConsole *con, std::string header, const std::vector<std
     TCODConsole::blit(menu, 0, 0, width, height, con, x, y, 1.0f, 0.7f);
 }
 
-// void gui_render_inventory(TCODConsole *con, const std::string header, const EntityFat *player, int inventory_width, int screen_width, int screen_height) {
-//     std::vector<std::string> options;
-//     if(player->inventory->items.size() == 0) {
-//         options.push_back("Inventory is empty.");
-//     } else {
-//         for(auto item : player->inventory->items) {
-//             if(player->equipment->main_hand == item) {
-//                 options.push_back(item->item->name + " (in main hand)");
-//             } else if(player->equipment->off_hand == item) {
-//                 options.push_back(item->item->name + " (in off hand)");
-//             } else {
-//                 options.push_back(item->item->name);
-//             }
-//         }
-//     } 
+void gui_render_inventory(TCODConsole *con, const std::string header, const Entity player, int inventory_width, int screen_width, int screen_height) {
+    std::vector<std::string> options;
 
-//     gui_render_menu(con, header, options, inventory_width, screen_width, screen_height);
-// }
+    auto &player_inventory = get_inventory(player);
+    if(player_inventory.items.size() == 0) {
+        options.push_back("Inventory is empty.");
+    } else {
+        for(auto item_entity : player_inventory.items) {
+            auto &item = get_item(item_entity);
+            // if(player->equipment->main_hand == item) {
+            //     options.push_back(item->item->name + " (in main hand)");
+            // } else if(player->equipment->off_hand == item) {
+            //     options.push_back(item->item->name + " (in off hand)");
+            // } else {
+                options.push_back(item.name);
+            //}
+        }
+    } 
+
+    gui_render_menu(con, header, options, inventory_width, screen_width, screen_height);
+}
 
 void gui_render_main_menu(TCODConsole *con, int screen_width, int screen_height) {
     // static so only executed once
@@ -1475,15 +1535,16 @@ void gui_render_main_menu(TCODConsole *con, int screen_width, int screen_height)
     gui_render_menu(con, "", options, 24, screen_width, screen_height);
 }
 
-// void gui_render_level_up_menu(TCODConsole *con, std::string header, EntityFat *player, int menu_width, int screen_width, int screen_height) {
-//     std::vector<std::string> options = {
-//         "Constitution | +20 HP, current: " + std::to_string(player->fighter->hp_max),
-//         "Strength | +1 attack, current: " + std::to_string(player->fighter->power_max),
-//         "Agility | +1 defense, current: " + std::to_string(player->fighter->defense_max)
-//     };
+void gui_render_level_up_menu(TCODConsole *con, std::string header, Entity &player, int menu_width, int screen_width, int screen_height) {
+    auto &fighter = get_fighter(player);
+    std::vector<std::string> options = {
+        "Constitution | +20 HP, current: " + std::to_string(fighter.hp_max),
+        "Strength | +1 attack, current: " + std::to_string(fighter.power_max),
+        "Agility | +1 defense, current: " + std::to_string(fighter.defense_max)
+    };
 
-//     gui_render_menu(con, header, options, menu_width, screen_width, screen_height);
-// }
+    gui_render_menu(con, header, options, menu_width, screen_width, screen_height);
+}
 
 // void gui_render_character_screen(TCODConsole *con, EntityFat *player, int character_screen_width, int character_screen_height,  
 //     int screen_width, int screen_height) {
@@ -1530,27 +1591,15 @@ void entity_removed(const uint32_t &index_to, const uint32_t &index_from) {
     fighters[index_to] = fighters[index_from];
 }
 
-Entity player_handle;
 void new_game() {
     player_handle = entity_create();
     const auto c = entity_get_handle(player_handle);
     entity_add_component(c, entity_fats, 
         EntityFat(SCREEN_WIDTH/2, SCREEN_HEIGHT/2, '@', TCODColor::white, "Player", true, render_priority.ENTITY));
     entity_add_component(c, fighters, Fighter(100, 1, 2));
-
-//     entity_add_component(c, positions, Position_t { 66 });
-//     entity_add_component(c, visuals, Visual_t { 'c' });
-
-
-//     entity_iterate(create_mask<Position_t, Visual_t>(), [](const uint32_t &i) {
-//         printf("%d, %c | ", positions[i].x, visuals[i].gfx);
-//     });
-    
-    
-    
-    // player->inventory = new Inventory(player, 26);
-    // player->level = new Level();
-    // player->equipment = new Equipment();
+    entity_add_component(c, inventories, Inventory(player_handle, 26));
+    entity_add_component(c, levels, Level());
+    entity_add_component(c, equipments, Equipment());
 
     // EntityFat *e;
     // e = new EntityFat(0, 0, '-', TCOD_sky, "Dagger", false, render_priority.ITEM);
@@ -1573,7 +1622,7 @@ void new_game() {
 
     // add entities to map
     map_add_monsters(game_map);
-    // map_add_items(game_map);
+    map_add_items(game_map);
     // map_add_stairs(game_map);
     
     game_state = PLAYER_TURN;    
@@ -1595,7 +1644,7 @@ void next_floor(GameMap &map) {
     // game_map.num_rooms = 0;
     // delete game_map.tcod_fov_map;
 
-    // targeting_item = NULL;
+    targeting_item = InvalidEntity;
     
     // Tile t_base;
     // for(int x = 0; x < Map_Width; x++) {
@@ -1690,7 +1739,7 @@ void render_game() {
     ComponentHandle c = entity_get_handle(player_handle);
     Fighter *player_fighter = &fighters[c.i];        
     gui_render_bar(bar, 1, 1, Bar_width, "HP", player_fighter->hp, player_fighter->hp_max, TCOD_light_red, TCOD_darker_red);
-    // gui_render_mouse_look(bar, game_map, mouse.cx, mouse.cy);
+    gui_render_mouse_look(bar, game_map, mouse.cx, mouse.cy);
     bar->printEx(1, 3, TCOD_BKGND_NONE, TCOD_LEFT, "Dungeon level: %d", game_map.level);
     
     float colorCoef = 0.4f;
@@ -1788,34 +1837,31 @@ struct GamePlay : State {
                 take_stairs = true;
             }
 
-            ComponentHandle c = entity_get_handle(player_handle);
-            EntityFat *player = &entity_fats[c.i];
-            int dx = player->x + m.x, dy = player->y + m.y; 
+            auto &player = get_entityfat(player_handle);
+            int dx = player.x + m.x, dy = player.y + m.y; 
             if((m.x != 0 || m.y != 0) && !map_blocked(game_map, dx, dy)) {
                 Entity target;
                 if(entity_blocking_at(dx, dy, target)) {
                     attack(player_handle, target);
                 } else {
-                    player->x = dx;
-                    player->y = dy;
-                    game_map.tcod_fov_map->computeFov(player->x, player->y, fov_radius, fov_light_walls, fov_algorithm);
+                    player.x = dx;
+                    player.y = dy;
+                    game_map.tcod_fov_map->computeFov(player.x, player.y, fov_radius, fov_light_walls, fov_algorithm);
                 }
 
                 game_state = ENEMY_TURN;
             } else if(pickup) {
-                // for(int i = 0; i < _entities.size(); i++) {
-                //     auto entity = _entities[i];
-                //     if(player->x == entity->x && player->y == entity->y && entity->item) {
-                //         events_queue({ EventType::ItemPickup, entity });
-                //         game_state = ENEMY_TURN;
-                //         pickup = false;
-                //         break;  
-                //     }
-                // }
-                // // if we still want to pickup after we checked entities there is nothing to pickup
-                // if(pickup) {
-                //     events_queue({ EventType::Message, NULL, "There is nothing here to pick up.", TCOD_yellow });
-                // }
+                entity_iterate(create_mask<EntityFat, Item>(), [&](const uint32_t &i) {
+                    if(player.x == entity_fats[i].x && player.y == entity_fats[i].y) {
+                        events_queue({ EventType::ItemPickup, entities[i] });
+                        game_state = ENEMY_TURN;
+                        pickup = false;
+                    }
+                });
+                // if we still want to pickup after we checked entities there is nothing to pickup
+                if(pickup) {
+                    events_queue({ EventType::Message, Entity(), "There is nothing here to pick up.", TCOD_yellow });
+                }
             } else if(take_stairs) {
                 // for(int i = 0; i < _entities.size(); i++) {
                 //     auto entity = _entities[i];
@@ -1835,12 +1881,6 @@ struct GamePlay : State {
                     ais[i].take_turn(player_handle, game_map);
                 }
             });
-            // for(int i = 1; i < _entities.size(); i++) {
-            //     const auto entity = _entities[i];
-            //     if(!entity->marked_for_deletion && entity->ai) {
-            //         entity->ai->take_turn(player, game_map);
-            //     }
-            // }
             game_state = PLAYER_TURN;
         }
     }
@@ -1850,59 +1890,69 @@ struct GamePlay : State {
     }
 };
 
-// struct PlayerDead : State {
-//     void update() override {
-//         if(input_key_pressed('i')) {
-//             previous_game_state = game_state;
-//             game_state = SHOW_INVENTORY;
-//         } else if(input_key_pressed(TCODK_ESCAPE)) {
-//             engine_exit();
-//         }
-//     };
+struct PlayerDead : State {
+    void update() override {
+        if(input_key_pressed('i')) {
+            previous_game_state = game_state;
+            game_state = SHOW_INVENTORY;
+        } else if(input_key_pressed(TCODK_ESCAPE)) {
+            engine_exit();
+        }
+    };
 
-//     void render() override {
-//         render_game();
-//     };
-// };
-// struct InventoryState : State {
-//     void update() override {
-//         int index = (int)key.c - (int)'a';
-//         if(index >= 0 && previous_game_state != PLAYER_DEAD && index < player->inventory->items.size()) {
-//             if(key.lalt) {
-//                 // DROP ITEM
-//                 auto item_entity = player->inventory->items[index];
-//                 item_entity->x = player->x;
-//                 item_entity->y = player->y;
-//                 _entities.push_back(item_entity);
-//                 player->inventory->remove(item_entity);
-//                 if(player->equipment->main_hand == item_entity || player->equipment->off_hand == item_entity) {
-//                     player->equipment->toggle_equipment(item_entity);
-//                 }
-//                 game_state = ENEMY_TURN;
-//             } else {
-//                 if(player->inventory->requires_target(index)) {
-//                     targeting_item = player->inventory->items[index];
-//                     previous_game_state = PLAYER_TURN;
-//                     game_state = TARGETING;
-//                     events_queue({ EventType::Message, NULL, targeting_item->item->targeting_message, TCOD_yellow });   
-//                 } else {
-//                     Context context = Context(_entities, game_map);
-//                     bool consumed = player->inventory->use(index, context);
-//                     game_state = ENEMY_TURN;
-//                 }
-//             }
-//         }
+    void render() override {
+        render_game();
+    };
+};
+
+struct InventoryState : State {
+    void update() override {
+        int index = (int)key.c - (int)'a';
+        auto &player_inventory = get_inventory(player_handle);
+        if(index >= 0 && previous_game_state != PLAYER_DEAD && index < (int)player_inventory.items.size()) {
+            if(key.lalt) {
+                // DROP ITEM
+                auto item_entity = player_inventory.items[index];
+                auto handle = entity_get_handle(item_entity);
+                entity_enable_component<EntityFat>(handle);
+                auto &entity_fat = get_entityfat(item_entity);
+                auto &player_fat = get_entityfat(player_handle);
+                entity_fat.x = player_fat.x;
+                entity_fat.y = player_fat.y;
+                player_inventory.remove(item_entity);
+                
+                // if(player->equipment->main_hand == item_entity || player->equipment->off_hand == item_entity) {
+                //     player->equipment->toggle_equipment(item_entity);
+                // }
+                game_state = ENEMY_TURN;
+            } else {
+                if(player_inventory.requires_target(index)) {
+                    targeting_item = player_inventory.items[index];
+                    previous_game_state = PLAYER_TURN;
+                    game_state = TARGETING;
+                    auto &item = get_item(targeting_item);
+                    events_queue({ EventType::Message, InvalidEntity, item.targeting_message, TCOD_yellow });   
+                } else {
+                    Context context = Context(game_map);
+                    bool consumed = player_inventory.use(index, context);
+                    game_state = ENEMY_TURN;
+                }
+            }
+        }
         
-//         if(key.vk == TCODK_ESCAPE) {
-//             game_state = previous_game_state;
-//         }
-//     };
+        if(key.vk == TCODK_ESCAPE) {
+            game_state = previous_game_state;
+        }
+    };
 
-//     void render() override {
-//         render_game();
-//         gui_render_inventory(root_console, "Press the key next to an item to use it (hold alt to drop), or Esc to cancel.\n", player, 50, SCREEN_WIDTH, SCREEN_HEIGHT);
-//     };
-// };
+    void render() override {
+        render_game();
+        gui_render_inventory(root_console, 
+            "Press the key next to an item to use it (hold alt to drop), or Esc to cancel.\n", 
+            player_handle, 50, SCREEN_WIDTH, SCREEN_HEIGHT);
+    };
+};
+
 // struct TargetingState : State {
 //     void update() override {
 //         int x = mouse.cx, y = mouse.cy;            
@@ -1924,6 +1974,7 @@ struct GamePlay : State {
 //         render_game();
 //     };
 // };
+
 // struct LevelUpState : State {
 //     void update() override {
 //         char key_char = key.c;
@@ -1945,6 +1996,7 @@ struct GamePlay : State {
 //         gui_render_level_up_menu(root_console, "Level up! Choose a stat to raise:", player, 40, SCREEN_WIDTH, SCREEN_HEIGHT);
 //     };
 // };
+
 // struct CharacterScreenState : State {
 //     void update() override {
 //         if(input_key_pressed(TCODK_ESCAPE)) {
@@ -1977,8 +2029,8 @@ int main( int argc, char *argv[] ) {
     auto game_play = new GamePlay();
     states.insert({ PLAYER_TURN, game_play });
     states.insert({ ENEMY_TURN, game_play });
-    // states.insert({ PLAYER_DEAD, new PlayerDead() });
-    // states.insert({ SHOW_INVENTORY , new InventoryState() });
+    states.insert({ PLAYER_DEAD, new PlayerDead() });
+    states.insert({ SHOW_INVENTORY , new InventoryState() });
     // states.insert({ TARGETING, new TargetingState() });
     // states.insert({ LEVEL_UP, new LevelUpState() });
     // states.insert({ CHARACTER_SCREEN, new CharacterScreenState() });
@@ -2034,29 +2086,19 @@ int main( int argc, char *argv[] ) {
                     }
                     break;
                 }
-                // case EventType::ItemPickup: {
-                //     auto success = player->inventory->add_item(e.entity);
-                //     if(success) {
-                //         gui_log_message(TCOD_yellow, "You picked up the %s !", e.entity->item->name.c_str());
-                //     } else {
-                //         gui_log_message(TCOD_yellow, "You cannot carry anymore, inventory full");
-                //     }
-                    
-                //     int delete_count = 0;
-                //     int index = 0;
-                //     for(auto &ev : _entities) {
-                //         if(ev == e.entity) {
-                //             delete_count++;
-                //             break;
-                //         }
-                //         index++;
-                //     }
-                //     if(delete_count == 0) {
-                //         engine_log(LogStatus::Error, "NO ITEM REMOVED WHEN PICKED UP!");
-                //     }
-                //     _entities.erase(_entities.begin() + index);
-                //     break;
-                // }
+                case EventType::ItemPickup: {
+                    auto &player_inventory = get_inventory(player_handle);
+                    auto success = player_inventory.add_item(e.entity);
+                    if(success) {
+                        auto &item = get_item(e.entity);
+                        gui_log_message(TCOD_yellow, "You picked up the %s !", item.name.c_str());
+                    } else {
+                        gui_log_message(TCOD_yellow, "You cannot carry anymore, inventory full");
+                    }
+                    const auto &c = entity_get_handle(e.entity);
+                    entity_disable_component<EntityFat>(c);
+                    break;
+                }
                 // case EventType::NextFloor: {
                 //     next_floor(game_map);
                 //     break;
