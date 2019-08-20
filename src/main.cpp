@@ -10,125 +10,23 @@
 // http://rogueliketutorials.com/tutorials/tcod/part-13/
 // http://www.roguebasin.com/index.php?title=Complete_roguelike_tutorial_using_C%2B%2B_and_libtcod_-_part_10.1:_persistence
 
-// ECS requirements
-// - find entity by id (or similar), e.g. events - get a handle on entities (alive or not?)
-// - systems -> iterate over entities
-
-////// ECS
-/*
-#include <queue>
-#include <bitset>
-
-const unsigned ENTITY_INDEX_BITS = 22;
-const unsigned ENTITY_INDEX_MASK = (1<<ENTITY_INDEX_BITS)-1;
-const unsigned ENTITY_GENERATION_BITS = 8;
-const unsigned ENTITY_GENERATION_MASK = (1<<ENTITY_GENERATION_BITS)-1;
-
-typedef unsigned EntityId;
-
-struct Entity {
-    EntityId id = 0;
-    unsigned index() const { return id & ENTITY_INDEX_MASK; }
-    unsigned generation() const { return (id >> ENTITY_INDEX_BITS) & ENTITY_GENERATION_MASK; }
-    bool equals(Entity other) {
-        return id == other.id;
-    }
-    const bool equals(const Entity &other) const {
-        return id == other.id;
-    }
-};
-
-class ComponentID {
-    static size_t counter;
-    public:
-        template<typename T>
-        static size_t value() {
-            static size_t id = counter++;
-            return id;
+// ECS Improvements
+// - easier to get a reference/pointer to component
+    /* 
+    value_type& operator[](key_type key){
+        if (buffered_){
+        auto remove_it = std::find(remove_.begin(), remove_.end(), key);
+        if (remove_it != remove_.end()) return super::nullElement_;
+        
+        if (super::indices_.count(key) == 0){
+            auto add_it = std::find_if(add_.begin(), add_.end(), [key](const T& t){ return t.id == key; });
+            if (add_it != add_.end()) return *add_it;
         }
-};
-size_t ComponentID::counter = 0;
-
-const unsigned MINIMUM_FREE_INDICES = 1024;
-struct EntityManager {
-    std::vector<unsigned char> _generation;
-    std::queue<unsigned> _free_indices;
-
-    Entity create() {
-        unsigned index;
-        if (_free_indices.size() > MINIMUM_FREE_INDICES) {
-            index = _free_indices.front();
-            _free_indices.pop();
-        } else {
-            _generation.push_back(0);
-            index = _generation.size() - 1;
-            // ASSERT_WITH_MSG(idx < (1 << ENTITY_INDEX_BITS), "index is malformed, larger than 22 bits?");
         }
-        return make_entity(index, _generation[index]);
+        return super::operator[](key);
     }
-
-    Entity make_entity(unsigned index, unsigned char generation) {
-        Entity e;
-        auto id = generation << ENTITY_INDEX_BITS | index;
-        e.id = id;
-        return e;
-    }
-
-    bool alive(Entity e) const {
-        return _generation[e.index()] == e.generation();
-    }
-
-    void destroy(Entity e) {
-        if(!alive(e))
-            return;
-        const unsigned idx = e.index();
-        ++_generation[idx];
-        _free_indices.push(idx);
-    }
-};
-
-typedef std::bitset<512> ComponentMask;
-
-struct PositionComponent { int x; };
-struct VisualComponent { char visual; };
-
-const int MAX_ENTITIES = 1000;
-
-struct Components {
-    std::vector<Entity> entities;
-    std::vector<PositionComponent> positions;
-    std::vector<VisualComponent> visuals;
-    std::vector<PlayerInput> player_inputs;
-} comps;
-*/
-/*
-
-            static const int invalid_handle = -1;
-            std::unordered_map<EntityId, unsigned> _map;
-
-            unsigned int index = entity.size();
-            _map[e.id] = index;
-            entity.push_back(e);
-
-            
-            Handle get_handle(Entity e) {
-                auto a = _map.find(e.id);
-                if(a != _map.end()) {
-                    return { (int)a->second };
-                }
-                return { invalid_handle };
-            }
-
-            const Handle get_handle(Entity e) const {
-                auto a = _map.find(e.id);
-                if(a != _map.end()) {
-                    return { (int)a->second };
-                }
-                return { invalid_handle };
-            }
-
- */
-// std::unordered_map<int, int> entity_map;
+    */
+// - 
 
 #include <bitset>
 #include <initializer_list>
@@ -166,6 +64,10 @@ ComponentMask masks[MAX_ENTITIES];
 
 std::function<void(const uint32_t &index)> on_entity_created;
 std::function<void(const uint32_t &index, const uint32_t &new_index)> on_entity_removed;
+
+bool entity_equals(const Entity &first, const Entity &second) {
+    return first.id == second.id && first.generation == second.generation;
+}
 
 Entity entity_create() {
     // CHECK IF ID IS IN ANY QUEUE
@@ -893,6 +795,11 @@ void attack(Entity attacker_e, Entity defender_e) {
     Fighter &attacker = get_fighter(attacker_e);
     Fighter &target_fighter = get_fighter(defender_e);
 
+    if(target_fighter.hp == 2) {
+        int a = 0;
+        a++;
+    }
+
     int damage = attacker.power() - target_fighter.defense();
     if(damage > 0) {
         // VERY SHITTY STRING ALLOCATION
@@ -960,32 +867,34 @@ void attack(Entity attacker_e, Entity defender_e) {
 //         : _owner(owner), previous(previous), turns_remaining(turns) {}
 // };
 
-// struct Level {
-//     int current_level;
-//     int current_xp;
-//     int level_up_base;
-//     int level_up_factor;
+struct Level {
+    int current_level;
+    int current_xp;
+    int level_up_base;
+    int level_up_factor;
 
-//     Level(int current_level = 1, int current_xp = 0, int level_up_base = 200, int level_up_factor = 150) :
-//         current_level(current_level), current_xp(current_xp), level_up_base(level_up_base), level_up_factor(level_up_factor) 
-//     {}
+    Level(int current_level = 1, int current_xp = 0, int level_up_base = 200, int level_up_factor = 150) :
+        current_level(current_level), current_xp(current_xp), level_up_base(level_up_base), level_up_factor(level_up_factor) 
+    {}
 
-//     int experience_to_next_level() {
-//         return level_up_base + current_level * level_up_factor;
-//     }
+    int experience_to_next_level() {
+        return level_up_base + current_level * level_up_factor;
+    }
 
-//     bool add_xp(int amount) {
-//         current_xp += amount;
+    bool add_xp(int amount) {
+        current_xp += amount;
 
-//         if(current_xp > experience_to_next_level()) {
-//             current_xp -= experience_to_next_level();
-//             current_level += 1;
-//             return true;
-//         } 
+        if(current_xp > experience_to_next_level()) {
+            current_xp -= experience_to_next_level();
+            current_level += 1;
+            return true;
+        } 
 
-//         return false;
-//     }
-// };
+        return false;
+    }
+};
+
+Level &get_level(Entity e);
 
 // bool cast_heal_entity(EntityFat *entity, const ItemArgs &args, Context &context) {
 //     if(entity->fighter->hp == entity->fighter->hp_max) {
@@ -1071,6 +980,7 @@ GameState previous_game_state = MAIN_MENU;
 
 EntityFat entity_fats[MAX_ENTITIES];
 Fighter fighters[MAX_ENTITIES];
+Level levels[1]; // test to only give component to player
 
 EntityFat &get_entityfat(Entity e) {
     ComponentHandle c = entity_get_handle(e);
@@ -1080,6 +990,11 @@ EntityFat &get_entityfat(Entity e) {
 Fighter &get_fighter(Entity e) {
     ComponentHandle c = entity_get_handle(e);
     return fighters[c.i];
+}
+
+Level &get_level(Entity e) {
+    ComponentHandle c = entity_get_handle(e);
+    return levels[c.i];
 }
 
 // UI
@@ -1770,7 +1685,7 @@ void render_game() {
     bar->printEx(1, 3, TCOD_BKGND_NONE, TCOD_LEFT, "Dungeon level: %d", game_map.level);
     
     float colorCoef = 0.4f;
-    for(int i = 0, y = 1; i < gui_log.size(); i++, y++) {
+    for(size_t i = 0, y = 1; i < gui_log.size(); i++, y++) {
         bar->setDefaultForeground(gui_log[i]->color * colorCoef);
         bar->print(Log_x, y, gui_log[i]->text);
         // could one-line this with a clamp;
@@ -2069,42 +1984,39 @@ int main( int argc, char *argv[] ) {
                 }
                 case EventType::EntityDead: {
                     // shitty way to know if player died
-                    if(e.entity == player_handle) {
-                        ComponentHandle c = entity_get_handle(e.entity);
-                        EntityFat *player = &entity_fats[c.i];
+                    if(entity_equals(e.entity, player_handle)) {
+                        auto &player = get_entityfat(e.entity);
                         
                         gui_log_message(TCOD_red, "YOU died!");
                         game_state = PLAYER_DEAD;
-                        player->gfx = '%';
-                        player->color = TCOD_dark_red;
-                        player->render_order = render_priority.CORPSE;
+                        player.gfx = '%';
+                        player.color = TCOD_dark_red;
+                        player.render_order = render_priority.CORPSE;
                     } else {
-                        ComponentHandle c = entity_get_handle(player_handle);
-                        EntityFat *player = &entity_fats[c.i];
-                        
                         ComponentHandle c = entity_get_handle(e.entity);
-                        EntityFat *entity = &entity_fats[c.i];
-                        Fighter *entity_fighter = &fighters[c.i];
+                        auto &entity_fat = entity_fats[c.i];
+                        auto &entity_fighter = fighters[c.i];
 
-                        gui_log_message(TCOD_light_green, "%s died!", entity->name.c_str());
+                        gui_log_message(TCOD_light_green, "%s died!", entity_fat.name.c_str());
                         
-                        auto xp_gained = entity_fighter->xp;
-                        bool leveled_up = player->level->add_xp(xp_gained);
+                        auto &player_level = get_level(player_handle);
+                        auto xp_gained = entity_fighter.xp;
+                        bool leveled_up = player_level.add_xp(xp_gained);
                         gui_log_message(TCOD_yellow, "You gain %d experience points.", xp_gained);
                         
                         if(leveled_up) {
-                            gui_log_message(TCOD_yellow, "You become stronger! You reached level %d", player->level->current_level);
+                            gui_log_message(TCOD_yellow, "You become stronger! You reached level %d", player_level.current_level);
                             previous_game_state = game_state;
                             game_state = LEVEL_UP;
                         }
 
-                        entity->gfx = '%';
-                        entity->color = TCOD_dark_red;
-                        entity->render_order = render_priority.CORPSE;
-                        entity->blocks = false;
-                        enemy->name = "remains of " + e.entity->name;
+                        entity_fat.gfx = '%';
+                        entity_fat.color = TCOD_dark_red;
+                        entity_fat.render_order = render_priority.CORPSE;
+                        entity_fat.blocks = false;
+                        entity_fat.name = "remains of " + entity_fat.name;
 
-                        entity_remove_component<Fighter>(e.entity);
+                        entity_remove_component(c, ComponentID::value<Fighter>());
                         // entity_remove_component<Ai>(e.entity);
                     }
                     break;
