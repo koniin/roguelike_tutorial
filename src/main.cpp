@@ -11,7 +11,6 @@
 // http://www.roguebasin.com/index.php?title=Complete_roguelike_tutorial_using_C%2B%2B_and_libtcod_-_part_10.1:_persistence
 
 /// Goals
-// - make it work (with current setup)
 // - better events (typed)
 // - make a simpler iteration function
 // - make systems
@@ -70,8 +69,10 @@ uint32_t num_entities;
 Entity entities[MAX_ENTITIES];
 ComponentMask masks[MAX_ENTITIES];
 
-std::function<void(const uint32_t &index)> on_entity_created;
-std::function<void(const uint32_t &index, const uint32_t &new_index)> on_entity_removed;
+void (*on_entity_created)(const uint32_t &index);
+// std::function<void(const uint32_t &index)> on_entity_created;
+void (*on_entity_removed)(const uint32_t &index, const uint32_t &new_index);
+// std::function<void(const uint32_t &index, const uint32_t &new_index)> on_entity_removed;
 
 inline bool entity_equals(const Entity &first, const Entity &second) {
     return first.id == second.id && first.generation == second.generation;
