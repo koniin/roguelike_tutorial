@@ -12,8 +12,6 @@
 
 /// Goals
 // - make it work (with current setup)
-    // => Dropping an item doesnt seem to work very well (did it ever?)
-    // => crash on exit?
 // - better events (typed)
 // - make a simpler iteration function
 // - make systems
@@ -919,7 +917,7 @@ void ConfusedMonster_take_turn(Entity &owner, Entity &target, GameMap &map, AiCo
     if(context.counter > 0) {
         context.counter--;
 
-        auto &entity_fat = get_entityfat(target);
+        auto &entity_fat = get_entityfat(owner);
         int rx = entity_fat.x + rand_int(0, 2) - 1;
         int ry = entity_fat.y + rand_int(0, 2) - 1;
 
@@ -927,11 +925,11 @@ void ConfusedMonster_take_turn(Entity &owner, Entity &target, GameMap &map, AiCo
             move_towards(map, entity_fat.x, entity_fat.y, rx, ry);
         }
     } else {
-        auto &entity_fat = get_entityfat(target);
+        auto &entity_fat = get_entityfat(owner);
         std::string msg = "The " + entity_fat.name + " is no longer confused!";
         events_queue({ EventType::Message, InvalidEntity, msg, TCOD_red });
         
-        Ai &ai = get_ai(target);
+        Ai &ai = get_ai(owner);
         ai.on_take_turn = context.secondary;
     }
 }
@@ -1306,7 +1304,7 @@ std::vector<ItemBlueprint> item_data = {
         1, "Fireball Scroll", '#', TCOD_red
     },
     { 
-        { { 25, 6 } },
+        { { 25, 1 } },
         2, "Confusion Scroll", '#', TCOD_light_pink
     },
     { 
@@ -1700,7 +1698,7 @@ void next_floor(GameMap &map) {
     std::vector<Entity> _entities_to_remove;
 
     for(size_t i = 1; i < num_entities; i++) {
-        if(!entity_equals(player_handle, entities[i])) {
+        if(!entity_equals(player_handle, entities[i]) && entity_has_component<EntityFat>(entities[i])) {
             _entities_to_remove.push_back(entities[i]);
         }
     }
