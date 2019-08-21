@@ -12,7 +12,8 @@
 
 /// Goals
 // - make it work (with current setup)
-    => Dropping an item doesnt seem to work very well (did it ever?)
+    // => Dropping an item doesnt seem to work very well (did it ever?)
+    // => crash on exit?
 // - better events (typed)
 // - make a simpler iteration function
 // - make systems
@@ -182,7 +183,7 @@ ComponentMask create_mask() {
     return create_mask<C1>() | create_mask<C2, Components ...>();
 }
 
-inline void entity_iterate(const ComponentMask &system_mask, std::function<void(uint32_t &index)> f) {
+void entity_iterate(const ComponentMask &system_mask, std::function<void(uint32_t &index)> f) {
     for(uint32_t i = 0; i < num_entities; i++) {
         if((masks[i] & system_mask) == system_mask) {
             f(i);
@@ -678,7 +679,7 @@ struct Equipment {
                 events_queue({ EventType::EquipmentChange, equippable_entity, "", TCOD_amber, 0 });
                 main_hand = InvalidEntity;
             } else {
-                if(entity_equals(main_hand, InvalidEntity)) {
+                if(!entity_equals(main_hand, InvalidEntity)) {
                     events_queue({ EventType::EquipmentChange, main_hand, "", TCOD_amber, 0 });
                 }
                 main_hand = equippable_entity;
