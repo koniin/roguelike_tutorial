@@ -1304,7 +1304,7 @@ std::vector<ItemBlueprint> item_data = {
         1, "Fireball Scroll", '#', TCOD_red
     },
     { 
-        { { 25, 1 } },
+        { { 25, 3 } },
         2, "Confusion Scroll", '#', TCOD_light_pink
     },
     { 
@@ -1348,16 +1348,22 @@ void map_add_items(GameMap &map) {
 
             // Also perhaps split items into different categories
             // so we can select a random category or a set number from each category
+            
             std::vector<int> chances;
+            std::vector<size_t> blue_data_index;
             chances.reserve(item_data.size());
+            blue_data_index.reserve(item_data.size());
+            int index = 0;
             for(auto id : item_data) {
                 int chance = from_dungeon_level(id.weights, map.level);
                 if(chance > 0) {
                     chances.push_back(chance);
+                    blue_data_index.push_back(index);
                 }
+                index++;
             }
             auto blueprint_index = rand_weighted_index(chances.data(), chances.size());
-            auto &item_blueprint = item_data[blueprint_index];
+            auto &item_blueprint = item_data[blue_data_index[blueprint_index]];
             //int index = rand_weighted_index(item_weights.data(), item_weights.size());
             auto e = entity_create();
             auto c = entity_get_handle(e);
