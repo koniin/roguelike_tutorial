@@ -738,7 +738,7 @@ struct Inventory {
 
     bool use(Entity &entity, Context &context) {
         if(entity_has_component<Equippable>(entity)) {
-            auto &equipment = get_equipment(entity);
+            auto &equipment = get_equipment(_owner);
             equipment.toggle_equipment(entity);
             return false;
         }
