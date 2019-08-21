@@ -12,6 +12,7 @@
 
 /// Goals
 // - better events (typed)
+ => make a wrapper around the queues to have one global manager?
 // - make a simpler iteration function
 // - make systems
 // - discrepancy between where events are queued 
@@ -34,6 +35,49 @@
     }
     */
 // - 
+
+struct SomeEvent {
+    int a;
+    int b;
+};
+
+typedef uint32_t EventListenerHandle;
+
+template<typename T>
+struct EventQueue {
+    std::unordered_map<EventListenerHandle, std::function<void(const T&)>> listeners;
+    std::vector<T> queue;
+
+    static const EventListenerHandle next_listener_id() {
+        static EventListenerHandle id = 0;
+        return ++id;
+    };
+
+    EventListenerHandle add_listener(std::function<void(const T&)> handler) {
+        auto id = next_listener_id();
+        listeners[id] = handler;
+    }
+
+    void remove_listener(EventListenerHandle handle) {
+        listeners.remove(handle);
+    }
+
+    void queue_event(const T &event) {
+        queue.push_back(event);
+    }
+
+    void tick() {
+        for(auto &e : queue) {
+            trigger(e);
+        }
+    }
+
+    void trigger(const T &event) {
+        for (const auto& l : listeners) {
+            l.second(e);
+        }
+    }
+};
 
 #include <bitset>
 #include <initializer_list>
