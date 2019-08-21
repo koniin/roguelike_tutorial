@@ -1269,14 +1269,20 @@ void map_add_monsters(GameMap &map) {
             }
 
             std::vector<int> chances;
+            std::vector<size_t> blue_data_index;
             chances.reserve(monster_data.size());
+            blue_data_index.reserve(monster_data.size());
+            int index = 0;
             for(auto md : monster_data) {
                 int chance = from_dungeon_level(md.weights, map.level);
-                if(chance > 0)
+                if(chance > 0) {
                     chances.push_back(chance);
+                    blue_data_index.push_back(index);
+                }
+                index++;
             }
             auto blueprint_index = rand_weighted_index(chances.data(), chances.size());
-            auto &m = monster_data[blueprint_index];
+            auto &m = monster_data[blue_data_index[blueprint_index]];
 
             auto e = entity_create();
             auto c = entity_get_handle(e);
