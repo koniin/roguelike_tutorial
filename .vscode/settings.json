@@ -3,6 +3,7 @@
         "algorithm": "cpp",
         "cmath": "cpp",
         "functional": "cpp",
-        "memory": "cpp"
+        "memory": "cpp",
+        "random": "cpp"
     }
 }

@@ -574,27 +574,54 @@ void events_queue(Event e) {
     _event_queue.push_back(e);
 }
 
-struct EV {
-    virtual ~EV() {}
+/////////////////////////////
+// eventing
+
+#include <stack>
+
+struct GEvent {
+	size_t type;
+	static size_t counter;
+
+	template<typename T>
+	bool is() {
+		return getType<T>() == type;
+	}
+
+	template<typename T>
+	void set() {
+		type = getType<T>();
+	}
+
+	template<typename T>
+	T *get() {
+		return static_cast<T*>(this);
+	}
+    
+	template<typename T>
+	static size_t getType() {
+		static size_t id = counter++;
+		return id;
+	}
 };
-struct EvMessage : EV {
+size_t GEvent::counter;
+
+struct EvMessage : GEvent {
     std::string message;
     TCOD_color_t color;
 
+    EvMessage() {}
     EvMessage(std::string m, TCOD_color_t c) : message(m), color(c) {}
 };
-std::vector<std::shared_ptr<EV>> _events;
+std::vector<GEvent*> _events;
 
 template<typename T>
-bool event_is(std::shared_ptr<EV> e) {
-    std::shared_ptr<T> b = std::dynamic_pointer_cast<T>(e);
-    return b != NULL;
+void event_queue(GEvent *event) {
+    event->set<T>();
+    _events.push_back(event);
 }
 
-template<typename T> 
-void event_queue(T event) {
-    _events.push_back(std::make_shared<T>(event));
-}
+///////////////////////////////
 
 const int Map_Width = 80;
 const int Map_Height = 43;
@@ -809,7 +836,8 @@ struct Inventory {
 
         if(!item.on_use) {    
             std::string msg = "The " + item.name + " cannot be used.";
-            event_queue(EvMessage(msg, TCOD_yellow));
+            
+            event_queue<EvMessage>(new EvMessage{ msg, TCOD_yellow });
             // events_queue({ EventType::Message, InvalidEntity, msg, TCOD_yellow});
             return false;
         }
@@ -928,7 +956,7 @@ void attack(Entity attacker_e, Entity defender_e) {
         // sprintf(buffer, "%s attacks %s for %d hit points", e_attacker.name.c_str(), e_defender.name.c_str(), damage);
         
         std::string buffer = e_attacker.name + " attacks " + e_defender.name + " for " + std::to_string(damage) + " hit points";
-        event_queue(EvMessage(buffer, TCOD_amber));
+        event_queue<EvMessage>(new EvMessage(buffer, TCOD_amber));
         //events_queue({ EventType::Message, attacker_e, buffer, TCOD_amber });
         take_damage(defender_e, damage);
     } else {
@@ -936,7 +964,7 @@ void attack(Entity attacker_e, Entity defender_e) {
         // char buffer[255];
         // sprintf(buffer, "%s attacks %s but deals no damage", e_attacker.name.c_str(), e_defender.name.c_str());
         std::string buffer = e_attacker.name + " attacks " + e_defender.name + " but deals no damage";
-        event_queue(EvMessage(buffer, TCOD_light_grey));
+        event_queue<EvMessage>(new EvMessage(buffer, TCOD_light_grey));
         //events_queue({ EventType::Message, attacker_e, buffer, TCOD_light_grey });
     }
 }
@@ -997,7 +1025,7 @@ void ConfusedMonster_take_turn(Entity &owner, Entity &target, GameMap &map, AiCo
     } else {
         auto &entity_fat = get_entityfat(owner);
         std::string msg = "The " + entity_fat.name + " is no longer confused!";
-        event_queue(EvMessage(msg, TCOD_red));
+        event_queue<EvMessage>(new EvMessage(msg, TCOD_red));
         // events_queue({ EventType::Message, InvalidEntity, msg, TCOD_red });
         
         Ai &ai = get_ai(owner);
@@ -1115,12 +1143,12 @@ Equipment &get_equipment(Entity &e) {
 bool cast_heal_entity(Entity entity, const ItemArgs &args, Context &context) {
     auto &fighter = get_fighter(entity);
     if(fighter.hp == fighter.hp_max) {
-        event_queue(EvMessage("You are already at full health", TCOD_yellow));
+        event_queue<EvMessage>(new EvMessage("You are already at full health", TCOD_yellow));
         //events_queue({ EventType::Message, InvalidEntity, "You are already at full health", TCOD_yellow });
         return false;
     } 
     heal(fighter, args.amount);
-    event_queue(EvMessage("Your wounds start to feel better!", TCOD_green));
+    event_queue<EvMessage>(new EvMessage("Your wounds start to feel better!", TCOD_green));
     //events_queue({ EventType::Message, InvalidEntity, "Your wounds start to feel better!", TCOD_green });
     return true;
 }
@@ -1146,24 +1174,24 @@ bool cast_lightning_bolt(Entity caster, const ItemArgs &args, Context &context) 
         take_damage(closest, args.amount);
         std::string msg = "A lighting bolt strikes the " + closest_fat.name + " with a loud thunder! \nThe damage is " + std::to_string(args.amount);
         // events_queue({ EventType::Message, InvalidEntity, msg, TCOD_amber });
-        event_queue(EvMessage(msg, TCOD_amber));
+        event_queue<EvMessage>(new EvMessage(msg, TCOD_amber));
         return true;
     } else {
         //events_queue({ EventType::Message, InvalidEntity, "No enemy is close enough to strike.", TCOD_red });
-        event_queue(EvMessage("No enemy is close enough to strike.", TCOD_red));
+        event_queue<EvMessage>(new EvMessage("No enemy is close enough to strike.", TCOD_red));
         return false;
     }
 }
 
 bool cast_fireball(Entity caster, const ItemArgs &args, Context &context) {
     if(!context.map.tcod_fov_map->isInFov(args.target_x, args.target_y)) {
-        event_queue(EvMessage("You cannot target a tile outside your field of view.", TCOD_yellow));
+        event_queue<EvMessage>(new EvMessage("You cannot target a tile outside your field of view.", TCOD_yellow));
         //events_queue({ EventType::Message, InvalidEntity, "You cannot target a tile outside your field of view.", TCOD_yellow });
         return false;
     }
 
     std::string msg = "The fireball explodes, burning everything within " + std::to_string(args.range) + " tiles!";
-    event_queue(EvMessage(msg, TCOD_orange));
+    event_queue<EvMessage>(new EvMessage(msg, TCOD_orange));
     //events_queue({ EventType::Message, InvalidEntity, msg, TCOD_orange });
 
     entity_iterate(create_mask<EntityFat, Fighter>(), [&](const uint32_t &i) {
@@ -1172,7 +1200,7 @@ bool cast_fireball(Entity caster, const ItemArgs &args, Context &context) {
         if(distance_to(entity_fat.x, entity_fat.y, args.target_x, args.target_y) <= args.range) {
             msg = "The " + entity_fat.name + " gets burned for " + std::to_string(args.amount) + " hit points.";
             //events_queue({ EventType::Message, InvalidEntity, msg, TCOD_orange });
-            event_queue(EvMessage(msg, TCOD_orange));
+            event_queue<EvMessage>(new EvMessage(msg, TCOD_orange));
             take_damage(entities[i], args.amount);
         }
     });
@@ -1182,7 +1210,7 @@ bool cast_fireball(Entity caster, const ItemArgs &args, Context &context) {
 
 bool cast_confuse(Entity caster, const ItemArgs &args, Context &context) {
     if(!context.map.tcod_fov_map->isInFov(args.target_x, args.target_y)) {
-        event_queue(EvMessage("You cannot target a tile outside your field of view.", TCOD_yellow));
+        event_queue<EvMessage>(new EvMessage("You cannot target a tile outside your field of view.", TCOD_yellow));
         //events_queue({ EventType::Message, InvalidEntity, "You cannot target a tile outside your field of view.", TCOD_yellow });
         return false;
     }
@@ -1193,7 +1221,7 @@ bool cast_confuse(Entity caster, const ItemArgs &args, Context &context) {
         if(entity_fat.x == args.target_x &&  entity_fat.y == args.target_y) {
             std::string msg = "The eyes of the " + entity_fat.name + " looks vacant as it starts to stumble around!";
             //events_queue({ EventType::Message, InvalidEntity, msg, TCOD_light_green });
-            event_queue(EvMessage(msg, TCOD_light_green));
+            event_queue<EvMessage>(new EvMessage(msg, TCOD_light_green));
             ais[i].context.secondary = ais[i].on_take_turn;
             ais[i].on_take_turn = ConfusedMonster_take_turn;
             ais[i].context.counter = 10;
@@ -1205,7 +1233,7 @@ bool cast_confuse(Entity caster, const ItemArgs &args, Context &context) {
     }
 
     std::string msg = "There is no targetable entity at that location.";
-    event_queue(EvMessage(msg, TCOD_light_yellow));
+    event_queue<EvMessage>(new EvMessage(msg, TCOD_light_yellow));
     //events_queue({ EventType::Message, InvalidEntity, msg, TCOD_yellow });
     return false;
 }
@@ -1834,7 +1862,7 @@ void next_floor(GameMap &map) {
     auto &player_fighter = get_fighter(player_handle);
     heal(player_fighter, player_fighter.hp_max / 2);
 
-    event_queue(EvMessage("You take a moment to rest, and recover your strength.", TCOD_light_blue));
+    event_queue<EvMessage>(new EvMessage("You take a moment to rest, and recover your strength.", TCOD_light_blue));
     //events_queue({ EventType::Message, InvalidEntity, "You take a moment to rest, and recover your strength." });
 }
 
@@ -2201,13 +2229,15 @@ int main( int argc, char *argv[] ) {
         //// UPDATE
         states[game_state]->update();
         
-        for(auto &e : _events) {
-            if(event_is<EvMessage>(e)) {
-                auto msga = std::dynamic_pointer_cast<EvMessage>(e);
-                gui_log_message(msga->color, msga->message.c_str());
+        for(auto e : _events) {
+            if(e->is<EvMessage>()) {
+                auto ev = (EvMessage*)e;
+                gui_log_message(ev->color, ev->message.c_str());
             }
+            delete e;
         }
         _events.clear();
+        
 
         // EVENTS
         for(auto &e : _event_queue) {
