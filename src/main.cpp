@@ -12,9 +12,12 @@
 
 /// Goals
 // - better events (typed)
-//   => make a wrapper around the queues to have one global manager?
-// - make a simpler iteration function
+=> implement for all events
+
 // - make systems
+
+// - make a simpler iteration function
+
 // - discrepancy between where events are queued 
 //    - look at fighter, heal, attack and take_damage all have messages associated but are triggered in different ways
 // => brian bucklew events for inventory and equipment 
