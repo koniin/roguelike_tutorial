@@ -2,6 +2,7 @@
     "files.associations": {
         "algorithm": "cpp",
         "cmath": "cpp",
-        "functional": "cpp"
+        "functional": "cpp",
+        "memory": "cpp"
     }
 }
