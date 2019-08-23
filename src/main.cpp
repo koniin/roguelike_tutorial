@@ -11,8 +11,6 @@
 // http://www.roguebasin.com/index.php?title=Complete_roguelike_tutorial_using_C%2B%2B_and_libtcod_-_part_10.1:_persistence
 
 /// Goals
-// - better events (typed)
-=> implement for all events
 
 // - make systems
 
@@ -40,44 +38,6 @@
     }
     */
 // - 
-
-typedef uint32_t EventListenerHandle;
-
-template<typename T>
-struct EventQueue {
-    std::unordered_map<EventListenerHandle, std::function<void(const T&)>> listeners;
-    std::vector<T> queue;
-
-    static const EventListenerHandle next_listener_id() {
-        static EventListenerHandle id = 0;
-        return ++id;
-    };
-
-    EventListenerHandle add_listener(std::function<void(const T&)> handler) {
-        auto id = next_listener_id();
-        listeners[id] = handler;
-    }
-
-    void remove_listener(EventListenerHandle handle) {
-        listeners.erase(handle);
-    }
-
-    void queue_event(const T &event) {
-        queue.push_back(event);
-    }
-
-    void tick() {
-        for(auto &e : queue) {
-            trigger(e);
-        }
-    }
-
-    void trigger(const T &event) {
-        for (const auto& l : listeners) {
-            l.second(e);
-        }
-    }
-};
 
 #include <bitset>
 #include <initializer_list>
@@ -556,26 +516,7 @@ enum GameState {
     CHARACTER_SCREEN
 };
 
-enum EventType {
-    Message,
-    EntityDead,
-    ItemPickup,
-    NextFloor,
-    EquipmentChange
-};
 
-struct Event {
-    EventType type;
-    Entity entity;
-    std::string message;
-    TCOD_color_t color;
-    int flag;
-};
-
-std::vector<Event> _event_queue; 
-void events_queue(Event e) {
-    _event_queue.push_back(e);
-}
 
 /////////////////////////////
 // eventing
@@ -583,46 +524,47 @@ void events_queue(Event e) {
 #include <stack>
 
 struct GEvent {
-	size_t type;
-	static size_t counter;
-
-	template<typename T>
-	bool is() {
-		return getType<T>() == type;
-	}
-
-	template<typename T>
-	void set() {
-		type = getType<T>();
-	}
-
-	template<typename T>
-	T *get() {
-		return static_cast<T*>(this);
-	}
-    
-	template<typename T>
-	static size_t getType() {
-		static size_t id = counter++;
-		return id;
-	}
+    protected:
+        virtual ~GEvent() {};
 };
-size_t GEvent::counter;
+
+std::vector<GEvent*> _events;
+
+template<typename T>
+void event_queue(GEvent *event) {
+    _events.push_back(event);
+}
 
 struct EvMessage : GEvent {
     std::string message;
     TCOD_color_t color;
 
-    EvMessage() {}
     EvMessage(std::string m, TCOD_color_t c) : message(m), color(c) {}
 };
-std::vector<GEvent*> _events;
 
-template<typename T>
-void event_queue(GEvent *event) {
-    event->set<T>();
-    _events.push_back(event);
-}
+struct EvEntityDead : GEvent {
+    Entity entity;
+
+    EvEntityDead(Entity entity) : entity(entity) {}
+};
+
+struct EvItemPickup : GEvent {
+    Entity entity;
+
+    EvItemPickup(Entity entity) : entity(entity) {}
+};
+
+struct EvNextFloor : GEvent {};
+
+struct EvEquipmentChange : GEvent {
+    Entity entity;
+    short flag;
+
+    static const short Pickup = 1;
+    static const short Drop = 0;
+    
+    EvEquipmentChange(Entity entity, short flag) : entity(entity), flag(flag) {}
+};
 
 ///////////////////////////////
 
@@ -768,25 +710,25 @@ struct Equipment {
 
         if(slot == MAIN_HAND) {
             if(entity_equals(main_hand, equippable_entity)) {
-                events_queue({ EventType::EquipmentChange, equippable_entity, "", TCOD_amber, 0 });
+                event_queue<EvEquipmentChange>(new EvEquipmentChange( equippable_entity, 0 ));
                 main_hand = InvalidEntity;
             } else {
                 if(!entity_equals(main_hand, InvalidEntity)) {
-                    events_queue({ EventType::EquipmentChange, main_hand, "", TCOD_amber, 0 });
+                    event_queue<EvEquipmentChange>(new EvEquipmentChange(main_hand, 0 ));
                 }
                 main_hand = equippable_entity;
-                events_queue({ EventType::EquipmentChange, equippable_entity, "", TCOD_amber, 1 });
+                event_queue<EvEquipmentChange>(new EvEquipmentChange(equippable_entity,  1 ));
             }
         } else if(slot == OFF_HAND) {
             if(entity_equals(off_hand, equippable_entity)) {
-                events_queue({ EventType::EquipmentChange, equippable_entity, "", TCOD_amber, 0 });
+                event_queue<EvEquipmentChange>(new EvEquipmentChange(equippable_entity, 0 ));
                 off_hand = InvalidEntity;
             } else {
                 if(!entity_equals(off_hand, InvalidEntity)) {
-                    events_queue({ EventType::EquipmentChange, off_hand, "", TCOD_amber, 0 });
+                    event_queue<EvEquipmentChange>(new EvEquipmentChange(off_hand, 0 ));
                 }
                 off_hand = equippable_entity;
-                events_queue({ EventType::EquipmentChange, equippable_entity, "", TCOD_amber, 1 });
+                event_queue<EvEquipmentChange>(new EvEquipmentChange(equippable_entity, 1 ));
             }
         } else {
             engine_log(LogStatus::Warning, "Equipment slot is not implemented " + std::to_string(slot));
@@ -936,7 +878,7 @@ void take_damage(Entity entity, int amount) {
     f.hp -= amount;
     if(f.hp <= 0) {
         f.hp = 0;
-        events_queue({ EventType::EntityDead, entity });
+        event_queue<EvEntityDead>(new EvEntityDead( entity ));
     }
 }
 
@@ -2040,25 +1982,25 @@ struct GamePlay : State {
             } else if(pickup) {
                 entity_iterate(create_mask<EntityFat, Item>(), [&](const uint32_t &i) {
                     if(player.x == entity_fats[i].x && player.y == entity_fats[i].y) {
-                        events_queue({ EventType::ItemPickup, entities[i] });
+                        event_queue<EvItemPickup>(new EvItemPickup( entities[i] ));
                         game_state = ENEMY_TURN;
                         pickup = false;
                     }
                 });
                 // if we still want to pickup after we checked entities there is nothing to pickup
                 if(pickup) {
-                    events_queue({ EventType::Message, Entity(), "There is nothing here to pick up.", TCOD_yellow });
+                    event_queue<EvMessage>(new EvMessage("There is nothing here to pick up.", TCOD_yellow ));
                 }
             } else if(take_stairs) {
                 entity_iterate(create_mask<EntityFat, Stairs>(), [&](const uint32_t &i) {
                     if(player.x == entity_fats[i].x && player.y == entity_fats[i].y) {
-                        events_queue({ EventType::NextFloor, entities[i] });
+                        event_queue<EvNextFloor>(new EvNextFloor());
                         game_state = ENEMY_TURN;
                         take_stairs = false;
                     }
                 });
                 if(take_stairs) {
-                    events_queue({ EventType::Message, InvalidEntity, "There are no stairs here.", TCOD_yellow });
+                    event_queue<EvMessage>(new EvMessage("There are no stairs here.", TCOD_yellow ));
                 }
             }    
         } else {
@@ -2119,7 +2061,7 @@ struct InventoryState : State {
                     previous_game_state = PLAYER_TURN;
                     game_state = TARGETING;
                     auto &item = get_item(targeting_item);
-                    events_queue({ EventType::Message, InvalidEntity, item.targeting_message, TCOD_yellow });   
+                    event_queue<EvMessage>(new EvMessage(item.targeting_message, TCOD_yellow ));   
                 } else {
                     Context context = Context(game_map);
                     bool consumed = player_inventory.use(index, context);
@@ -2156,7 +2098,7 @@ struct TargetingState : State {
             }
         } else if(key.vk == TCODK_ESCAPE || mouse.rbutton_pressed) {
             game_state = previous_game_state;
-            events_queue({ EventType::Message, InvalidEntity, "Targeting cancelled", TCOD_yellow });   
+            event_queue<EvMessage>(new EvMessage("Targeting cancelled", TCOD_yellow ));   
         }
     };
 
@@ -2232,86 +2174,99 @@ int main( int argc, char *argv[] ) {
         //// UPDATE
         states[game_state]->update();
         
-        for(auto e : _events) {
-            if(e->is<EvMessage>()) {
-                auto ev = (EvMessage*)e;
-                gui_log_message(ev->color, ev->message.c_str());
+        for(auto event : _events) {
+            if(auto *message = dynamic_cast<EvMessage*>(event)) {
+                gui_log_message(message->color, message->message.c_str());
+                delete message;
+            } else if(auto *dead = dynamic_cast<EvEntityDead*>(event)) {
+                if(entity_equals(dead->entity, player_handle)) {
+                    auto &player = get_entityfat(dead->entity);
+                    
+                    gui_log_message(TCOD_red, "YOU died!");
+                    game_state = PLAYER_DEAD;
+                    player.gfx = '%';
+                    player.color = TCOD_dark_red;
+                    player.render_order = render_priority.CORPSE;
+                } else {
+                    ComponentHandle c = entity_get_handle(dead->entity);
+                    auto &entity_fat = entity_fats[c.i];
+                    auto &entity_fighter = fighters[c.i];
+
+                    gui_log_message(TCOD_light_green, "%s died!", entity_fat.name.c_str());
+                    
+                    auto &player_level = get_level(player_handle);
+                    auto xp_gained = entity_fighter.xp;
+                    bool leveled_up = player_level.add_xp(xp_gained);
+                    gui_log_message(TCOD_yellow, "You gain %d experience points.", xp_gained);
+                    
+                    if(leveled_up) {
+                        gui_log_message(TCOD_yellow, "You become stronger! You reached level %d", player_level.current_level);
+                        previous_game_state = game_state;
+                        game_state = LEVEL_UP;
+                    }
+
+                    entity_fat.gfx = '%';
+                    entity_fat.color = TCOD_dark_red;
+                    entity_fat.render_order = render_priority.CORPSE;
+                    entity_fat.blocks = false;
+                    entity_fat.name = "remains of " + entity_fat.name;
+
+                    entity_remove_component(c, ComponentID::value<Fighter>());
+                    // entity_remove_component<Ai>(e.entity);
+                }
+                delete dead;
+            } else if(auto *pickup = dynamic_cast<EvItemPickup*>(event)) {
+                auto &player_inventory = get_inventory(player_handle);
+                auto success = player_inventory.add_item(pickup->entity);
+                if(success) {
+                    auto &item = get_item(pickup->entity);
+                    gui_log_message(TCOD_yellow, "You picked up the %s !", item.name.c_str());
+                } else {
+                    gui_log_message(TCOD_yellow, "You cannot carry anymore, inventory full");
+                }
+                const auto &c = entity_get_handle(pickup->entity);
+                entity_disable_component<EntityFat>(c);
+                delete pickup;
+            } else if(auto *nfloor_event = dynamic_cast<EvNextFloor*>(event)) {
+                next_floor(game_map);
+                delete nfloor_event;
+            } else if(auto *equipment = dynamic_cast<EvEquipmentChange*>(event)) {
+                auto &item = get_item(equipment->entity);
+                if(equipment->flag == 0) {
+                    gui_log_message(TCOD_yellow, "You dequipped the %s", item.name.c_str());
+                } else if(equipment->flag == 1) {
+                    gui_log_message(TCOD_yellow, "You equipped the %s", item.name.c_str());
+                }
+                delete equipment;
+            } else {
+                engine_log(LogStatus::Warning, "no handler registered for this event");
             }
-            delete e;
         }
         _events.clear();
         
 
         // EVENTS
-        for(auto &e : _event_queue) {
-            switch(e.type) {
-                case EventType::EntityDead: {
-                    if(entity_equals(e.entity, player_handle)) {
-                        auto &player = get_entityfat(e.entity);
-                        
-                        gui_log_message(TCOD_red, "YOU died!");
-                        game_state = PLAYER_DEAD;
-                        player.gfx = '%';
-                        player.color = TCOD_dark_red;
-                        player.render_order = render_priority.CORPSE;
-                    } else {
-                        ComponentHandle c = entity_get_handle(e.entity);
-                        auto &entity_fat = entity_fats[c.i];
-                        auto &entity_fighter = fighters[c.i];
-
-                        gui_log_message(TCOD_light_green, "%s died!", entity_fat.name.c_str());
-                        
-                        auto &player_level = get_level(player_handle);
-                        auto xp_gained = entity_fighter.xp;
-                        bool leveled_up = player_level.add_xp(xp_gained);
-                        gui_log_message(TCOD_yellow, "You gain %d experience points.", xp_gained);
-                        
-                        if(leveled_up) {
-                            gui_log_message(TCOD_yellow, "You become stronger! You reached level %d", player_level.current_level);
-                            previous_game_state = game_state;
-                            game_state = LEVEL_UP;
-                        }
-
-                        entity_fat.gfx = '%';
-                        entity_fat.color = TCOD_dark_red;
-                        entity_fat.render_order = render_priority.CORPSE;
-                        entity_fat.blocks = false;
-                        entity_fat.name = "remains of " + entity_fat.name;
-
-                        entity_remove_component(c, ComponentID::value<Fighter>());
-                        // entity_remove_component<Ai>(e.entity);
-                    }
-                    break;
-                }
-                case EventType::ItemPickup: {
-                    auto &player_inventory = get_inventory(player_handle);
-                    auto success = player_inventory.add_item(e.entity);
-                    if(success) {
-                        auto &item = get_item(e.entity);
-                        gui_log_message(TCOD_yellow, "You picked up the %s !", item.name.c_str());
-                    } else {
-                        gui_log_message(TCOD_yellow, "You cannot carry anymore, inventory full");
-                    }
-                    const auto &c = entity_get_handle(e.entity);
-                    entity_disable_component<EntityFat>(c);
-                    break;
-                }
-                case EventType::NextFloor: {
-                    next_floor(game_map);
-                    break;
-                }
-                case EventType::EquipmentChange: {
-                    auto &item = get_item(e.entity);
-                    if(e.flag == 0) {
-                        gui_log_message(TCOD_yellow, "You dequipped the %s", item.name.c_str());
-                    } else if(e.flag == 1) {
-                        gui_log_message(TCOD_yellow, "You equipped the %s", item.name.c_str());
-                    }
-                    break;
-                }
-            }
-        }
-        _event_queue.clear();
+        // for(auto &e : _event_queue) {
+        //     switch(e.type) {
+        //         case EventType::EntityDead: {
+                    
+        //             break;
+        //         }
+        //         case EventType::ItemPickup: {
+                    
+        //             break;
+        //         }
+        //         case EventType::NextFloor: {
+                    
+        //             break;
+        //         }
+        //         case EventType::EquipmentChange: {
+                    
+        //             break;
+        //         }
+        //     }
+        // }
+        // _event_queue.clear();
 
         //// RENDER
         
